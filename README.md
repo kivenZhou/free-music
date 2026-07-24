@@ -35,7 +35,7 @@
 | 平台 | 推荐文件 |
 |------|----------|
 | macOS（Intel / Apple Silicon） | `YinZhan_*_macos_universal.dmg` 或 `.zip` |
-| Windows | `.exe`（NSIS）或 `.msi`（由 Actions 构建后上传） |
+| Windows | `YinZhan_*_windows_x64-setup.exe` |
 
 ### macOS
 
