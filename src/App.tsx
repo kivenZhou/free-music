@@ -786,6 +786,26 @@ function App() {
           })}
         </nav>
 
+        {nav === "charts" ? (
+          <div className="source-block">
+            <div className="source-label">音源</div>
+            <div className="source-list">
+              {providers.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`source-btn ${providerId === p.id ? "on" : ""}`}
+                  onClick={() => setProviderId(p.id)}
+                >
+                  {providerLabel(p.id)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="source-block" aria-hidden />
+        )}
+
         <div className="sidebar-foot">仅免费完整曲目</div>
       </aside>
 
@@ -793,8 +813,6 @@ function App() {
         <div className={`view-pane ${nav === "charts" ? "on" : ""}`}>
           <ChartsView
             providerId={providerId}
-            providers={providers}
-            onProviderId={setProviderId}
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             playing={playing}

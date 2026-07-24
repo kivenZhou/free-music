@@ -259,10 +259,16 @@ impl KuwoProvider {
         Ok(())
     }
 
-    async fn search_raw(&self, query: &str, fetch_n: u32) -> Result<Vec<Track>, ProviderError> {
+    async fn search_raw(
+        &self,
+        query: &str,
+        fetch_n: u32,
+        page: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
         let url = format!(
-            "http://search.kuwo.cn/r.s?all={}&ft=music&itemset=web_2013&client=kt&pn=0&rn={}&rformat=json&encoding=utf8",
+            "http://search.kuwo.cn/r.s?all={}&ft=music&itemset=web_2013&client=kt&pn={}&rn={}&rformat=json&encoding=utf8",
             urlencoding::encode(query),
+            page,
             fetch_n
         );
         let resp = self.client.get(&url).send().await?;
@@ -290,7 +296,7 @@ impl MusicProvider for KuwoProvider {
     }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        let candidates = self.search_raw(query, limit).await?;
+        let candidates = self.search_raw(query, limit, 0).await?;
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 
@@ -306,10 +312,23 @@ impl MusicProvider for KuwoProvider {
             .collect())
     }
 
-    async fn chart_tracks(&self, chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
+    async fn chart_tracks(
+        &self,
+        chart_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
         // chart_id is a keyword for free searchable music
-        let candidates = self.search_raw(chart_id, limit).await?;
-        Ok(candidates.into_iter().take(limit as usize).collect())
+        // kuwo `pn` is 0-based page index with `rn` page size.
+        let page_size = limit.max(1);
+        let page = offset / page_size;
+        let skip = (offset % page_size) as usize;
+        let candidates = self.search_raw(chart_id, page_size, page).await?;
+        Ok(candidates
+            .into_iter()
+            .skip(skip)
+            .take(limit as usize)
+            .collect())
     }
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {

@@ -78,8 +78,10 @@ pub async fn chart_tracks(
     chart_id: String,
     provider: Option<String>,
     limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<Track>, String> {
-    let limit = limit.unwrap_or(80);
+    let limit = limit.unwrap_or(20);
+    let offset = offset.unwrap_or(0);
     let p = match provider.as_deref() {
         Some(id) => state
             .providers
@@ -87,7 +89,7 @@ pub async fn chart_tracks(
             .ok_or_else(|| format!("unknown provider: {id}"))?,
         None => state.providers.primary(),
     };
-    p.chart_tracks(&chart_id, limit)
+    p.chart_tracks(&chart_id, limit, offset)
         .await
         .map_err(|e| e.to_string())
 }

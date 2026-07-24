@@ -88,10 +88,16 @@ impl KugouProvider {
         })
     }
 
-    async fn search_raw(&self, query: &str, pagesize: u32) -> Result<Vec<Track>, ProviderError> {
+    async fn search_raw(
+        &self,
+        query: &str,
+        pagesize: u32,
+        page: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
         let url = format!(
-            "http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword={}&page=1&pagesize={}&showtype=1",
+            "http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword={}&page={}&pagesize={}&showtype=1",
             urlencoding::encode(query),
+            page.max(1),
             pagesize
         );
         let resp = self.client.get(&url).send().await?;
@@ -169,7 +175,7 @@ impl MusicProvider for KugouProvider {
     }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        let candidates = self.search_raw(query, limit).await?;
+        let candidates = self.search_raw(query, limit, 1).await?;
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 
@@ -185,9 +191,21 @@ impl MusicProvider for KugouProvider {
             .collect())
     }
 
-    async fn chart_tracks(&self, chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        let candidates = self.search_raw(chart_id, limit).await?;
-        Ok(candidates.into_iter().take(limit as usize).collect())
+    async fn chart_tracks(
+        &self,
+        chart_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
+        let page_size = limit.max(1);
+        let page = (offset / page_size) + 1;
+        let skip = (offset % page_size) as usize;
+        let candidates = self.search_raw(chart_id, page_size, page).await?;
+        Ok(candidates
+            .into_iter()
+            .skip(skip)
+            .take(limit as usize)
+            .collect())
     }
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {

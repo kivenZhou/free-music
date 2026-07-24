@@ -184,36 +184,58 @@ impl BilibiliProvider {
         &self,
         query: &str,
         limit: u32,
+        offset: u32,
         expand: bool,
     ) -> Result<Vec<Track>, ProviderError> {
         let _guard = self.api_lock.lock().await;
 
-        let url = format!(
-            "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={}&page=1&tids=3",
-            urlencoding::encode(query)
-        );
+        // B站搜索默认每页约 20 条。
+        let page_size = 20u32;
+        let mut page = (offset / page_size) + 1;
+        let mut skip = offset % page_size;
+        let mut tracks = Vec::new();
 
-        let json = self.fetch_json(&url).await?;
-        let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
-        if code != 0 {
-            let msg = json
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("unknown");
-            // -412 / -799 style risk control
-            if code == -412 || code == -799 || code == -352 {
+        while tracks.len() < limit as usize {
+            let url = format!(
+                "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={}&page={page}&page_size={page_size}&tids=3",
+                urlencoding::encode(query)
+            );
+
+            let json = self.fetch_json(&url).await?;
+            let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+            if code != 0 {
+                let msg = json
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown");
+                // -412 / -799 style risk control
+                if code == -412 || code == -799 || code == -352 {
+                    // Keep whatever we already have if a later page is blocked.
+                    if !tracks.is_empty() {
+                        break;
+                    }
+                    return Err(ProviderError::Msg(format!(
+                        "B站搜索被限制 ({code})，请稍后再试"
+                    )));
+                }
                 return Err(ProviderError::Msg(format!(
-                    "B站搜索被限制 ({code})，请稍后再试"
+                    "B站搜索失败 ({code}): {msg}"
                 )));
             }
-            return Err(ProviderError::Msg(format!(
-                "B站搜索失败 ({code}): {msg}"
-            )));
-        }
 
-        let mut tracks = Vec::new();
-        if let Some(arr) = json.pointer("/data/result").and_then(|v| v.as_array()) {
+            let Some(arr) = json.pointer("/data/result").and_then(|v| v.as_array()) else {
+                break;
+            };
+            if arr.is_empty() {
+                break;
+            }
+
+            let before = tracks.len();
             for item in arr {
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
                 if let Some(t) = Self::map_video_item(item) {
                     tracks.push(t);
                     if tracks.len() >= limit as usize {
@@ -221,6 +243,13 @@ impl BilibiliProvider {
                     }
                 }
             }
+            // No progress or short page → stop paging.
+            if tracks.len() == before || arr.len() < page_size as usize {
+                break;
+            }
+
+            page += 1;
+            tokio::time::sleep(Duration::from_millis(220)).await;
         }
 
         tracks.truncate(limit as usize);
@@ -352,7 +381,7 @@ impl MusicProvider for BilibiliProvider {
     }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        let candidates = self.search_raw(query, limit, false).await?;
+        let candidates = self.search_raw(query, limit, 0, false).await?;
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 
@@ -368,7 +397,12 @@ impl MusicProvider for BilibiliProvider {
             .collect())
     }
 
-    async fn chart_tracks(&self, chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
+    async fn chart_tracks(
+        &self,
+        chart_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
         let kw = match chart_id {
             "bili_new" => "最新上传 音乐",
             "bili_cover" => "翻唱",
@@ -377,7 +411,7 @@ impl MusicProvider for BilibiliProvider {
             "bili_hot" => "热门 华语 音乐",
             _ => "华语流行 音乐",
         };
-        let candidates = self.search_raw(kw, limit, false).await?;
+        let candidates = self.search_raw(kw, limit, offset, false).await?;
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 

@@ -83,8 +83,19 @@ impl MusicProvider for YoutubeProvider {
         ])
     }
 
-    async fn chart_tracks(&self, _chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        self.search("华语流行金曲合集", limit).await
+    async fn chart_tracks(
+        &self,
+        _chart_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
+        let need = offset.saturating_add(limit);
+        let batch = self.search("华语流行金曲合集", need).await?;
+        Ok(batch
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect())
     }
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {

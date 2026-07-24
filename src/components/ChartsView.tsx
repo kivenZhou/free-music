@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import { api, providerLabel } from "../api";
-import type { Chart, ProviderInfo, Track } from "../types";
+import type { Chart, Track } from "../types";
 import { SongList } from "./SongList";
 
 interface Props {
   providerId: string;
-  providers: ProviderInfo[];
-  onProviderId: (id: string) => void;
   favoriteKeys: Set<string>;
   currentKey?: string | null;
   playing?: boolean;
@@ -20,23 +18,29 @@ interface Props {
   onToggleFavorite: (track: Track) => void;
 }
 
+const PAGE_SIZE = 20;
+
 const REGION_LABEL: Record<string, string> = {
   cn: "国内",
   kr: "韩国",
   jp: "日本",
   us: "欧美",
-  bilibili: "B站",
-  youtube: "YT",
 };
+
+function regionBadge(region: string): string | null {
+  return REGION_LABEL[region] ?? null;
+}
 
 function reqKey(provider: string, chartId: string) {
   return `${provider}::${chartId}`;
 }
 
+function trackKey(t: Track) {
+  return `${t.provider}:${t.id}`;
+}
+
 export function ChartsView({
   providerId,
-  providers,
-  onProviderId,
   favoriteKeys,
   currentKey,
   playing,
@@ -52,6 +56,8 @@ export function ChartsView({
   const [active, setActive] = useState<string | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   /** Only the latest in-flight request may commit UI state. */
@@ -62,11 +68,14 @@ export function ChartsView({
     const key = reqKey(provider, chartId);
     inflightKey.current = key;
     setLoading(true);
+    setLoadingMore(false);
+    setHasMore(false);
     setError(null);
     try {
-      const res = await api.chartTracks(chartId, 40, provider);
+      const res = await api.chartTracks(chartId, PAGE_SIZE, provider, 0);
       if (inflightKey.current !== key) return;
       setTracks(res);
+      setHasMore(res.length >= PAGE_SIZE);
     } catch (e) {
       if (inflightKey.current !== key) return;
       // Keep previous list on transient Bilibili failures (rate-limit / decode errors)
@@ -78,6 +87,43 @@ export function ChartsView({
     }
   }, []);
 
+  const loadMore = useCallback(async () => {
+    if (!active || loading || loadingMore || !hasMore) return;
+    const provider = providerId;
+    const chartId = active;
+    const key = reqKey(provider, chartId);
+    const offset = tracks.length;
+    inflightKey.current = key;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await api.chartTracks(chartId, PAGE_SIZE, provider, offset);
+      if (inflightKey.current !== key) return;
+      if (res.length === 0) {
+        setHasMore(false);
+        return;
+      }
+      const seen = new Set(tracks.map(trackKey));
+      const fresh = res.filter((t) => !seen.has(trackKey(t)));
+      if (fresh.length === 0) {
+        setHasMore(false);
+        return;
+      }
+      setTracks((prev) => {
+        const keys = new Set(prev.map(trackKey));
+        return [...prev, ...fresh.filter((t) => !keys.has(trackKey(t)))];
+      });
+      setHasMore(res.length >= PAGE_SIZE);
+    } catch (e) {
+      if (inflightKey.current !== key) return;
+      setError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      if (inflightKey.current === key) {
+        setLoadingMore(false);
+      }
+    }
+  }, [active, loading, loadingMore, hasMore, providerId, tracks]);
+
   // Remount-safe provider bootstrap
   useEffect(() => {
     const epoch = ++providerEpoch.current;
@@ -86,8 +132,10 @@ export function ChartsView({
     setCharts([]);
     setActive(null);
     setTracks([]);
+    setHasMore(false);
     setError(null);
     setLoading(true);
+    setLoadingMore(false);
     inflightKey.current = null;
 
     (async () => {
@@ -111,6 +159,7 @@ export function ChartsView({
         setCharts([]);
         setTracks([]);
         setActive(null);
+        setHasMore(false);
         setError(String(e).replace(/^Error:\s*/, ""));
         setLoading(false);
       }
@@ -126,16 +175,16 @@ export function ChartsView({
 
   const selectChart = useCallback(
     (chartId: string) => {
-      if (chartId === active && loading) return;
+      if (chartId === active && !loading) return;
       setActive(chartId);
-      setError(null);
+      setHasMore(false);
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
       }
-      // Debounce rapid tab clicks so we don't queue up Bilibili API calls
       debounceRef.current = window.setTimeout(() => {
+        debounceRef.current = null;
         void fetchTracksFor(providerId, chartId);
-      }, 280);
+      }, 180);
     },
     [active, loading, fetchTracksFor, providerId],
   );
@@ -163,7 +212,7 @@ export function ChartsView({
           {loading ? (
             <span className="panel-head-meta">加载中…</span>
           ) : tracks.length > 0 ? (
-            <span className="panel-head-meta">{tracks.length} 首可播</span>
+            <span className="panel-head-meta">{tracks.length} 首</span>
           ) : null}
           {!loading && tracks.length > 0 ? (
             <button
@@ -187,34 +236,24 @@ export function ChartsView({
         </div>
       </header>
 
-      {providers.length > 0 ? (
-        <div className="provider-filter chart-providers" role="tablist" aria-label="音源">
-          {providers.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={`chip ${providerId === p.id ? "on" : ""}`}
-              onClick={() => onProviderId(p.id)}
-            >
-              {p.name}
-            </button>
-          ))}
+      {charts.length > 0 ? (
+        <div className="chart-tabs" role="tablist" aria-label="分类">
+          {charts.map((c) => {
+            const badge = regionBadge(c.region);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className={`chart-tab ${active === c.id ? "on" : ""}`}
+                onClick={() => selectChart(c.id)}
+              >
+                {c.name}
+                {badge ? <span>{badge}</span> : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
-
-      <div className="chart-tabs">
-        {charts.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={`chart-tab ${active === c.id ? "on" : ""}`}
-            onClick={() => selectChart(c.id)}
-          >
-            {c.name}
-            <span>{REGION_LABEL[c.region] ?? c.region}</span>
-          </button>
-        ))}
-      </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
       {loading && tracks.length === 0 ? (
@@ -235,6 +274,20 @@ export function ChartsView({
             onToggleFavorite={onToggleFavorite}
             hideProvider
           />
+          {hasMore ? (
+            <div className="load-more-wrap">
+              <button
+                type="button"
+                className="ghost-btn load-more-btn"
+                disabled={loadingMore || loading}
+                onClick={() => void loadMore()}
+              >
+                {loadingMore ? "加载中…" : "加载更多"}
+              </button>
+            </div>
+          ) : tracks.length > 0 && !loading ? (
+            <p className="load-more-end">已加载全部</p>
+          ) : null}
         </div>
       ) : null}
     </section>

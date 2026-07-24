@@ -16,8 +16,12 @@ export const api = {
     invoke<Track[]>("search_tracks", { query, limit, provider }),
   listCharts: (provider: string | null = null) =>
     invoke<Chart[]>("list_charts", { provider }),
-  chartTracks: (chartId: string, limit = 40, provider: string | null = null) =>
-    invoke<Track[]>("chart_tracks", { chartId, limit, provider }),
+  chartTracks: (
+    chartId: string,
+    limit = 20,
+    provider: string | null = null,
+    offset = 0,
+  ) => invoke<Track[]>("chart_tracks", { chartId, limit, provider, offset }),
   resolvePlayUrl: (track: Track) =>
     invoke<PlayUrl>("resolve_play_url", {
       trackId: track.id,

@@ -32,7 +32,12 @@ pub trait MusicProvider: Send + Sync {
     fn name(&self) -> &'static str;
     async fn search(&self, query: &str, limit: u32) -> Result<Vec<Track>, ProviderError>;
     async fn charts(&self) -> Result<Vec<Chart>, ProviderError>;
-    async fn chart_tracks(&self, chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError>;
+    async fn chart_tracks(
+        &self,
+        chart_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Track>, ProviderError>;
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError>;
     /// Optional synced lyrics (LRC). Default: unsupported.
     async fn lyrics(

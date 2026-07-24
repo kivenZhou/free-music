@@ -114,34 +114,100 @@ impl NeteaseProvider {
 
 
 
+    async fn fetch_song_details(&self, ids: &[u64]) -> Result<Vec<Value>, ProviderError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids_param = ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let url = format!("https://music.163.com/api/song/detail?ids=[{ids_param}]");
+        let resp = self.client.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+        Ok(json
+            .get("songs")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default())
+    }
+
     async fn fetch_playlist_tracks(
         &self,
         playlist_id: &str,
         limit: u32,
+        offset: u32,
     ) -> Result<Vec<Track>, ProviderError> {
+        // `n` asks for more embedded tracks; full charts still need trackIds + song/detail.
         let url = format!(
-            "https://music.163.com/api/v3/playlist/detail?id={}",
-            playlist_id
+            "https://music.163.com/api/v3/playlist/detail?id={playlist_id}&n=1000&s=0"
         );
         let resp = self.client.post(&url).send().await?;
         let text = resp.text().await?;
         let json: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        
-        // Handle code: -447 or missing tracks
+
         if json.get("code").and_then(|c| c.as_i64()) == Some(-447) {
             return Err(ProviderError::Parse("Netease rate limited (-447)".into()));
         }
 
-        let tracks = json
-            .pointer("/playlist/tracks")
-            .or_else(|| json.pointer("/result/tracks"))
+        let mut ids: Vec<u64> = json
+            .pointer("/playlist/trackIds")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| ProviderError::Parse(format!("playlist tracks missing (code: {:?})", json.get("code"))))?;
-        Ok(tracks
-            .iter()
-            .filter_map(Self::map_song)
-            .take(limit as usize)
-            .collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.get("id").and_then(|v| v.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if ids.is_empty() {
+            ids = json
+                .pointer("/playlist/tracks")
+                .or_else(|| json.pointer("/result/tracks"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|item| item.get("id").and_then(|v| v.as_u64()))
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+
+        if ids.is_empty() {
+            return Err(ProviderError::Parse(format!(
+                "playlist tracks missing (code: {:?})",
+                json.get("code")
+            )));
+        }
+
+        // Collect free/playable tracks, then apply offset/limit in that filtered space
+        // so VIP songs don't shrink a page below PAGE_SIZE and hide「加载更多」.
+        let mut skipped = 0u32;
+        let mut out = Vec::new();
+        const BATCH: usize = 50;
+
+        for chunk in ids.chunks(BATCH) {
+            if out.len() >= limit as usize {
+                break;
+            }
+            let songs = self.fetch_song_details(chunk).await?;
+            for song in songs {
+                let Some(track) = Self::map_song(&song) else {
+                    continue;
+                };
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                out.push(track);
+                if out.len() >= limit as usize {
+                    break;
+                }
+            }
+        }
+
+        Ok(out)
     }
 
     /// Official anonymous player URL API (works for free / fee=8 tracks).
@@ -422,8 +488,13 @@ impl MusicProvider for NeteaseProvider {
             .collect())
     }
 
-    async fn chart_tracks(&self, chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        let tracks = self.fetch_playlist_tracks(chart_id, limit).await?;
+    async fn chart_tracks(
+        &self,
+        chart_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Track>, ProviderError> {
+        let tracks = self.fetch_playlist_tracks(chart_id, limit, offset).await?;
         Ok(tracks)
     }
 
