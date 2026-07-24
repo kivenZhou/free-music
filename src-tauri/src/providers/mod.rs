@@ -36,6 +36,45 @@ pub trait MusicProvider: Send + Sync {
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError>;
 }
 
+fn normalize_text(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Loose title match for cross-provider play fallback (avoid wrong-track playback).
+pub fn titles_similar(a: &str, b: &str) -> bool {
+    let na = normalize_text(a);
+    let nb = normalize_text(b);
+    if na.is_empty() || nb.is_empty() {
+        return false;
+    }
+    if na == nb {
+        return true;
+    }
+    let (longer, shorter) = if na.len() >= nb.len() {
+        (&na, &nb)
+    } else {
+        (&nb, &na)
+    };
+    // Require the shorter side to be meaningful and contained.
+    shorter.len() >= 2 && longer.contains(shorter)
+}
+
+pub fn artists_similar(a: &str, b: &str) -> bool {
+    let na = normalize_text(a);
+    let nb = normalize_text(b);
+    if na.is_empty() || nb.is_empty() {
+        // Unknown artist on either side — allow title-only match.
+        return true;
+    }
+    if na == nb {
+        return true;
+    }
+    na.contains(&nb) || nb.contains(&na)
+}
+
 pub struct ProviderRegistry {
     providers: Vec<Box<dyn MusicProvider>>,
 }
@@ -43,10 +82,12 @@ pub struct ProviderRegistry {
 impl ProviderRegistry {
     pub fn with_defaults(cache_dir: PathBuf) -> Self {
         let audio = cache_dir.join("audio");
+        let _ = std::fs::create_dir_all(&audio);
         Self {
             providers: vec![
-                Box::new(BilibiliProvider::new(audio.join("bilibili"))),
+                // Default / primary: 网易云 (matches UI + README)
                 Box::new(NeteaseProvider::new(audio.join("netease"))),
+                Box::new(BilibiliProvider::new(audio.join("bilibili"))),
                 Box::new(KugouProvider::new(audio.join("kugou"))),
                 Box::new(KuwoProvider::new(audio.join("kuwo"))),
                 // 咪咕：公开搜索可用，但免费播放地址接口已关闭，暂不接入
@@ -138,6 +179,14 @@ impl ProviderRegistry {
                 }
                 if let Ok(tracks) = p.search(&q, 5).await {
                     for t in tracks {
+                        if !titles_similar(title, &t.title) {
+                            continue;
+                        }
+                        if let Some(artist) = hint_artist.filter(|s| !s.is_empty()) {
+                            if !artists_similar(artist, &t.artist) {
+                                continue;
+                            }
+                        }
                         if let Ok(url) = p.play_url(&t.id).await {
                             return Ok(url);
                         }

@@ -30,6 +30,7 @@ pub struct NeteaseProvider {
 
 impl NeteaseProvider {
     pub fn new(cache_dir: PathBuf) -> Self {
+        let _ = std::fs::create_dir_all(&cache_dir);
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -200,6 +201,7 @@ impl NeteaseProvider {
     }
 
     async fn download_to_cache(&self, track_id: &str, remote: &str) -> Result<PathBuf, ProviderError> {
+        let _ = std::fs::create_dir_all(&self.cache_dir);
         let path = self.cache_dir.join(format!("{track_id}.mp3"));
         if path.exists() {
             if let Ok(meta) = std::fs::metadata(&path) {
@@ -227,6 +229,7 @@ impl NeteaseProvider {
         let tmp = path.with_extension("mp3.part");
         std::fs::write(&tmp, &bytes).map_err(|e| ProviderError::Msg(e.to_string()))?;
         std::fs::rename(&tmp, &path).map_err(|e| ProviderError::Msg(e.to_string()))?;
+        crate::cache::enforce_limit(&self.cache_dir.parent().unwrap_or(&self.cache_dir));
         Ok(path)
     }
 

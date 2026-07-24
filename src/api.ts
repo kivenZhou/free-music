@@ -32,7 +32,15 @@ export const api = {
   listFavorites: () => invoke<FavoriteItem[]>("list_favorites"),
   isFavorite: (provider: string, trackId: string) =>
     invoke<boolean>("is_favorite", { provider, trackId }),
+  getCacheStats: () => invoke<CacheStats>("get_cache_stats"),
+  clearAudioCache: () => invoke<CacheStats>("clear_audio_cache"),
 };
+
+export interface CacheStats {
+  sizeBytes: number;
+  fileCount: number;
+  path: string;
+}
 
 export function formatDuration(ms?: number | null): string {
   if (!ms || ms <= 0) return "—:—";
@@ -40,6 +48,13 @@ export function formatDuration(ms?: number | null): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export function providerLabel(id: string): string {
@@ -54,8 +69,6 @@ export function providerLabel(id: string): string {
       return "B站";
     case "youtube":
       return "YouTube";
-    case "migu":
-      return "咪咕";
     default:
       return id;
   }

@@ -336,7 +336,8 @@ impl BilibiliProvider {
             .send()
             .await?;
         let bytes = resp.bytes().await?;
-        std::fs::write(&path, bytes).map_err(|e| ProviderError::Msg(e.to_string()))?;
+        std::fs::write(&path, &bytes).map_err(|e| ProviderError::Msg(e.to_string()))?;
+        crate::cache::enforce_limit(&self.cache_dir);
         Ok(path)
     }
 }

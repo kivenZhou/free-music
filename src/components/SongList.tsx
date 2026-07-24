@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Track } from "../types";
 import { formatDuration, providerLabel } from "../api";
-import { Play, Heart, Music2, ListPlus, ListEnd } from "lucide-react";
+import { Play, Pause, Heart, Music2, ListPlus, ListEnd } from "lucide-react";
 
 interface Props {
   tracks: Track[];
@@ -9,6 +9,8 @@ interface Props {
   playing?: boolean;
   favoriteKeys: Set<string>;
   onPlay: (track: Track, queue: Track[]) => void;
+  /** Pause / resume when clicking the currently playing row cover. */
+  onTogglePlay?: () => void;
   onToggleFavorite: (track: Track) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
@@ -55,6 +57,7 @@ export function SongList({
   playing = false,
   favoriteKeys,
   onPlay,
+  onTogglePlay,
   onToggleFavorite,
   onPlayNext,
   onAddToQueue,
@@ -75,14 +78,34 @@ export function SongList({
         const key = keyOf(t);
         const active = currentKey === key;
         const fav = favoriteKeys.has(key);
+        const coverTitle = active
+          ? playing
+            ? `暂停 ${t.title}`
+            : `继续播放 ${t.title}`
+          : `播放 ${t.title}`;
+
+        const onCoverClick = () => {
+          if (active && onTogglePlay) {
+            onTogglePlay();
+            return;
+          }
+          onPlay(t, tracks);
+        };
+
         return (
           <li
             key={key}
             className={`song-row ${active ? "active" : ""} ${active && playing ? "playing" : ""} ${hideProvider ? "no-src" : ""}`}
-            onDoubleClick={() => onPlay(t, tracks)}
+            onDoubleClick={() => {
+              if (active && onTogglePlay) {
+                onTogglePlay();
+                return;
+              }
+              onPlay(t, tracks);
+            }}
           >
             <span className="idx">
-              {active && playing ? (
+              {active ? (
                 <PlayingBars />
               ) : (
                 String(i + 1).padStart(2, "0")
@@ -90,13 +113,17 @@ export function SongList({
             </span>
             <button
               className="cover-btn"
-              onClick={() => onPlay(t, tracks)}
+              onClick={onCoverClick}
               type="button"
-              title={`播放 ${t.title}`}
+              title={coverTitle}
             >
               <Cover url={t.coverUrl} />
               <span className="cover-play">
-                <Play size={18} fill="currentColor" />
+                {active && playing ? (
+                  <Pause size={18} fill="currentColor" />
+                ) : (
+                  <Play size={18} fill="currentColor" />
+                )}
               </span>
             </button>
             <div className="meta">

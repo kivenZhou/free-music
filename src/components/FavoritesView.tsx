@@ -9,6 +9,7 @@ interface Props {
   currentKey?: string | null;
   playing?: boolean;
   onPlay: (track: Track, queue: Track[]) => void;
+  onTogglePlay?: () => void;
   onPlayAll: (tracks: Track[]) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
@@ -21,6 +22,7 @@ export function FavoritesView({
   currentKey,
   playing,
   onPlay,
+  onTogglePlay,
   onPlayAll,
   onPlayNext,
   onAddToQueue,
@@ -65,6 +67,7 @@ export function FavoritesView({
         playing={playing}
         favoriteKeys={favoriteKeys}
         onPlay={onPlay}
+        onTogglePlay={onTogglePlay}
         onPlayNext={onPlayNext}
         onAddToQueue={onAddToQueue}
         onToggleFavorite={onToggleFavorite}

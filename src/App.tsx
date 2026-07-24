@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { api, providerLabel } from "./api";
+import { api, formatBytes, providerLabel } from "./api";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
@@ -65,12 +65,16 @@ function App() {
   const [volume, setVolume] = useState(readStoredVolume);
   const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
   const [queueOpen, setQueueOpen] = useState(false);
+  const [cacheLabel, setCacheLabel] = useState<string | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const queueRef = useRef<Track[]>([]);
   const queueIndexRef = useRef(-1);
   const shuffleRef = useRef(false);
   const repeatRef = useRef<RepeatMode>("off");
+  const playGenRef = useRef(0);
+  const failSkipRef = useRef(0);
   const playTrackAtRef = useRef<(tracks: Track[], index: number) => void>(() => undefined);
   const advanceRef = useRef<(dir: 1 | -1, opts?: { fromEnded?: boolean }) => void>(
     () => undefined,
@@ -115,7 +119,31 @@ function App() {
       }
     });
     refreshFavorites().catch(() => undefined);
+    api
+      .getCacheStats()
+      .then((s) => {
+        if (s.fileCount > 0) {
+          setCacheLabel(`${formatBytes(s.sizeBytes)} · ${s.fileCount} 文件`);
+        }
+      })
+      .catch(() => undefined);
   }, [refreshFavorites]);
+
+  const clearCache = useCallback(async () => {
+    if (clearingCache) return;
+    setClearingCache(true);
+    try {
+      const s = await api.clearAudioCache();
+      setCacheLabel(s.fileCount > 0 ? `${formatBytes(s.sizeBytes)} · ${s.fileCount} 文件` : "已清空");
+      window.setTimeout(() => {
+        setCacheLabel(null);
+      }, 2500);
+    } catch (e) {
+      setPlayError(String(e));
+    } finally {
+      setClearingCache(false);
+    }
+  }, [clearingCache]);
 
   useEffect(() => {
     localStorage.setItem("yinzhan-provider", providerId);
@@ -139,6 +167,7 @@ function App() {
     const audio = audioRef.current;
     if (!track || !audio) return;
 
+    const gen = ++playGenRef.current;
     setQueue(tracks);
     setQueueIndex(index);
     queueRef.current = tracks;
@@ -150,7 +179,9 @@ function App() {
     setDuration(0);
 
     try {
+      audio.pause();
       const resolved = await api.resolvePlayUrl(track);
+      if (gen !== playGenRef.current) return;
       const src = resolved.localPath
         ? convertFileSrc(resolved.localPath)
         : resolved.url;
@@ -159,16 +190,28 @@ function App() {
       }
       audio.src = src;
       await audio.play();
+      if (gen !== playGenRef.current) return;
+      failSkipRef.current = 0;
     } catch (e) {
+      if (gen !== playGenRef.current) return;
       setPlaying(false);
       setPlayError(String(e).replace(/^Error:\s*/, ""));
-      if (index < tracks.length - 1 || repeatRef.current === "all") {
+      const canAdvance = index < tracks.length - 1 || repeatRef.current === "all";
+      if (canAdvance && failSkipRef.current < 3) {
+        failSkipRef.current += 1;
         window.setTimeout(() => {
-          advanceRef.current(1);
+          if (gen === playGenRef.current) {
+            advanceRef.current(1);
+          }
         }, 600);
+      } else if (failSkipRef.current >= 3) {
+        setPlayError("连续多首无法播放，已暂停");
+        failSkipRef.current = 0;
       }
     } finally {
-      setLoadingPlay(false);
+      if (gen === playGenRef.current) {
+        setLoadingPlay(false);
+      }
     }
   }, []);
 
@@ -228,10 +271,19 @@ function App() {
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onErr = () => {
+      const gen = playGenRef.current;
       setPlaying(false);
       setPlayError("播放失败，尝试下一首…");
+      if (failSkipRef.current >= 3) {
+        setPlayError("连续多首无法播放，已暂停");
+        failSkipRef.current = 0;
+        return;
+      }
+      failSkipRef.current += 1;
       window.setTimeout(() => {
-        advanceRef.current(1);
+        if (gen === playGenRef.current) {
+          advanceRef.current(1);
+        }
       }, 500);
     };
 
@@ -608,13 +660,21 @@ function App() {
         )}
 
         <div className="sidebar-foot">
-          仅免费完整曲目
+          <div>仅免费完整曲目</div>
           {queue.length > 0 ? (
-            <>
-              <br />
+            <div>
               队列 {Math.max(queueIndex + 1, 0)} / {queue.length}
-            </>
+            </div>
           ) : null}
+          <button
+            type="button"
+            className="ghost-btn cache-clear-btn"
+            disabled={clearingCache}
+            onClick={() => void clearCache()}
+            title={cacheLabel ?? "清除本地音频缓存"}
+          >
+            {clearingCache ? "清理中…" : cacheLabel ? `清缓存 (${cacheLabel})` : "清除缓存"}
+          </button>
         </div>
       </aside>
 
@@ -626,6 +686,7 @@ function App() {
             currentKey={currentKey}
             playing={playing}
             onPlay={playFromList}
+            onTogglePlay={togglePlay}
             onPlayAll={playAll}
             onPlayNext={enqueueNext}
             onAddToQueue={addToQueue}
@@ -637,7 +698,9 @@ function App() {
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             playing={playing}
+            providers={providers}
             onPlay={playFromList}
+            onTogglePlay={togglePlay}
             onPlayAll={playAll}
             onPlayNext={enqueueNext}
             onAddToQueue={addToQueue}
@@ -651,6 +714,7 @@ function App() {
             currentKey={currentKey}
             playing={playing}
             onPlay={playFromList}
+            onTogglePlay={togglePlay}
             onPlayAll={playAll}
             onPlayNext={enqueueNext}
             onAddToQueue={addToQueue}
@@ -659,7 +723,7 @@ function App() {
           />
         </div>
         <div className={`view-pane ${nav === "history" ? "on" : ""}`}>
-          <HistoryView onSearch={goSearch} />
+          <HistoryView onSearch={goSearch} active={nav === "history"} />
         </div>
       </main>
 

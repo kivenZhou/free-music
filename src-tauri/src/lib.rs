@@ -1,3 +1,4 @@
+mod cache;
 mod commands;
 mod db;
 mod models;
@@ -14,11 +15,12 @@ pub fn run() {
     let db = Database::open_default().expect("open local database");
     let dirs = ProjectDirs::from("com", "zzy", "yinzhan").expect("app dirs");
     let cache_dir = dirs.cache_dir().to_path_buf();
-    let _ = std::fs::create_dir_all(&cache_dir);
+    let _ = std::fs::create_dir_all(cache_dir.join("audio"));
 
     let state = Arc::new(AppState {
         db,
-        providers: ProviderRegistry::with_defaults(cache_dir),
+        providers: ProviderRegistry::with_defaults(cache_dir.clone()),
+        cache_dir,
     });
 
     tauri::Builder::default()
@@ -35,6 +37,8 @@ pub fn run() {
             commands::remove_favorite,
             commands::list_favorites,
             commands::is_favorite,
+            commands::get_cache_stats,
+            commands::clear_audio_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

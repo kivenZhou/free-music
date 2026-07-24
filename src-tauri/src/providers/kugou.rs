@@ -153,6 +153,7 @@ impl KugouProvider {
         let tmp = path.with_extension("mp3.part");
         std::fs::write(&tmp, &bytes).map_err(|e| ProviderError::Msg(e.to_string()))?;
         std::fs::rename(&tmp, &path).map_err(|e| ProviderError::Msg(e.to_string()))?;
+        crate::cache::enforce_limit(&self.cache_dir);
         Ok(path)
     }
 }

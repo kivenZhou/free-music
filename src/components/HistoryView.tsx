@@ -1,25 +1,37 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { SearchHistoryItem } from "../types";
 
 interface Props {
   onSearch: (query: string) => void;
+  /** When true, reload history from disk (views stay mounted). */
+  active?: boolean;
 }
 
-export function HistoryView({ onSearch }: Props) {
+export function HistoryView({ onSearch, active = true }: Props) {
   const [items, setItems] = useState<SearchHistoryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     api
       .getSearchHistory(50)
       .then(setItems)
       .catch((e) => setError(String(e)));
   }, []);
 
+  useEffect(() => {
+    if (!active) return;
+    setError(null);
+    refresh();
+  }, [active, refresh]);
+
   async function clearAll() {
-    await api.clearSearchHistory();
-    setItems([]);
+    try {
+      await api.clearSearchHistory();
+      setItems([]);
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   return (

@@ -192,6 +192,7 @@ export function PlayerBar({
             max={1000}
             value={Math.round(ratio * 1000)}
             disabled={!track}
+            style={{ ["--seek-pct" as string]: `${Math.min(100, Math.max(0, ratio * 100))}%` }}
             onChange={(e) => onSeek(Number(e.target.value) / 1000)}
           />
           <span>{fmt(duration)}</span>
@@ -216,6 +217,9 @@ export function PlayerBar({
             min={0}
             max={100}
             value={Math.round(shownVolume * 100)}
+            style={{
+              ["--vol-pct" as string]: `${Math.min(100, Math.max(0, shownVolume * 100))}%`,
+            }}
             onChange={(e) => onVolume(Number(e.target.value) / 100)}
             title="音量"
           />

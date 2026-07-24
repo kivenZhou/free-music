@@ -1,14 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Play } from "lucide-react";
-import { api } from "../api";
-import type { SearchHistoryItem, Track } from "../types";
+import { api, providerLabel } from "../api";
+import type { ProviderInfo, SearchHistoryItem, Track } from "../types";
 import { SongList } from "./SongList";
 
 interface Props {
   favoriteKeys: Set<string>;
   currentKey?: string | null;
   playing?: boolean;
+  providers?: ProviderInfo[];
   onPlay: (track: Track, queue: Track[]) => void;
+  onTogglePlay?: () => void;
   onPlayAll: (tracks: Track[]) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
@@ -20,7 +22,9 @@ export function SearchView({
   favoriteKeys,
   currentKey,
   playing,
+  providers = [],
   onPlay,
+  onTogglePlay,
   onPlayAll,
   onPlayNext,
   onAddToQueue,
@@ -33,6 +37,7 @@ export function SearchView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  const [providerFilter, setProviderFilter] = useState("all");
 
   const refreshHistory = () => {
     api.getSearchHistory().then(setHistory).catch(() => undefined);
@@ -45,19 +50,19 @@ export function SearchView({
   useEffect(() => {
     if (initialQuery) {
       setQuery(initialQuery);
-      void runSearch(initialQuery);
+      void runSearch(initialQuery, providerFilter);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
 
-  async function runSearch(q: string) {
+  async function runSearch(q: string, provider = providerFilter) {
     const text = q.trim();
     if (!text) return;
     setLoading(true);
     setError(null);
     setSearched(true);
     try {
-      const result = await api.searchTracks(text, 40, "all");
+      const result = await api.searchTracks(text, 40, provider);
       setTracks(result);
       refreshHistory();
     } catch (e) {
@@ -72,13 +77,26 @@ export function SearchView({
     void runSearch(query);
   }
 
+  function onPickProvider(id: string) {
+    setProviderFilter(id);
+    if (query.trim() && searched) {
+      void runSearch(query, id);
+    }
+  }
+
+  const searchableProviders = providers.filter((p) => p.id !== "youtube");
+
   return (
     <section className="panel">
       <header className="panel-head row">
         <div>
           <p className="eyebrow">Search</p>
           <h1>搜索</h1>
-          <p>并行聚合 B站 / 网易云 / 酷狗 / 酷我 · 仅免费完整曲</p>
+          <p>
+            {providerFilter === "all"
+              ? "并行聚合 B站 / 网易云 / 酷狗 / 酷我 · 仅免费完整曲"
+              : `仅搜 ${providerLabel(providerFilter)} · 仅免费完整曲`}
+          </p>
         </div>
         {!loading && tracks.length > 0 ? (
           <button
@@ -102,6 +120,28 @@ export function SearchView({
           {loading ? "筛选中" : "搜索"}
         </button>
       </form>
+
+      {searchableProviders.length > 0 ? (
+        <div className="provider-filter" role="tablist" aria-label="音源筛选">
+          <button
+            type="button"
+            className={`chip ${providerFilter === "all" ? "on" : ""}`}
+            onClick={() => onPickProvider("all")}
+          >
+            全部
+          </button>
+          {searchableProviders.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`chip ${providerFilter === p.id ? "on" : ""}`}
+              onClick={() => onPickProvider(p.id)}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {history.length > 0 ? (
         <div className="history-chips">
@@ -133,6 +173,7 @@ export function SearchView({
             playing={playing}
             favoriteKeys={favoriteKeys}
             onPlay={onPlay}
+            onTogglePlay={onTogglePlay}
             onPlayNext={onPlayNext}
             onAddToQueue={onAddToQueue}
             onToggleFavorite={onToggleFavorite}

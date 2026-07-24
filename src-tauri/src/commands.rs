@@ -1,13 +1,16 @@
+use crate::cache::{self, CacheStats};
 use crate::db::Database;
 use crate::models::{Chart, FavoriteItem, PlayUrl, SearchHistoryItem, Track};
 use crate::providers::ProviderRegistry;
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
 
 pub struct AppState {
     pub db: Database,
     pub providers: ProviderRegistry,
+    pub cache_dir: PathBuf,
 }
 
 #[derive(Serialize)]
@@ -95,7 +98,7 @@ pub async fn resolve_play_url(
     title: Option<String>,
     artist: Option<String>,
 ) -> Result<PlayUrl, String> {
-    let provider_name = provider.unwrap_or_else(|| "kuwo".into());
+    let provider_name = provider.unwrap_or_else(|| "netease".into());
     let res = state
         .providers
         .resolve_play(
@@ -105,7 +108,7 @@ pub async fn resolve_play_url(
             artist.as_deref(),
         )
         .await;
-        
+
     match res {
         Ok(play_url) => Ok(play_url),
         Err(e) => {
@@ -113,12 +116,25 @@ pub async fn resolve_play_url(
             // Transparently fallback to Kuwo for the stream.
             if provider_name == "kugou" {
                 if let (Some(t), Some(a)) = (title.as_ref(), artist.as_ref()) {
-                    let query = format!("{} {}", t, a);
-                    if let Ok(kuwo_p) = state.providers.get("kuwo").ok_or(()) {
-                        if let Ok(tracks) = kuwo_p.search(&query, 1).await {
-                            if let Some(track) = tracks.first() {
-                                if let Ok(fallback_url) = state.providers.resolve_play(&track.id, "kuwo", Some(t), Some(a)).await {
-                                    return Ok(fallback_url);
+                    let query = format!("{t} {a}");
+                    if let Some(kuwo_p) = state.providers.get("kuwo") {
+                        if let Ok(tracks) = kuwo_p.search(&query, 5).await {
+                            for track in tracks {
+                                if crate::providers::titles_similar(t, &track.title)
+                                    && crate::providers::artists_similar(a, &track.artist)
+                                {
+                                    if let Ok(fallback_url) = state
+                                        .providers
+                                        .resolve_play(
+                                            &track.id,
+                                            "kuwo",
+                                            Some(t),
+                                            Some(a),
+                                        )
+                                        .await
+                                    {
+                                        return Ok(fallback_url);
+                                    }
                                 }
                             }
                         }
@@ -178,4 +194,14 @@ pub fn is_favorite(
         .db
         .is_favorite(&provider, &track_id)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_cache_stats(state: State<'_, Arc<AppState>>) -> CacheStats {
+    cache::stats(&state.cache_dir)
+}
+
+#[tauri::command]
+pub fn clear_audio_cache(state: State<'_, Arc<AppState>>) -> Result<CacheStats, String> {
+    cache::clear_all(&state.cache_dir)
 }
