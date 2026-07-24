@@ -676,22 +676,24 @@ function App() {
       }
       if (e.code === "ArrowLeft") {
         e.preventDefault();
-        playPrev();
+        const t = audioRef.current?.currentTime ?? 0;
+        seekToSeconds(t - 10);
         return;
       }
       if (e.code === "ArrowRight") {
         e.preventDefault();
-        playNext();
+        const t = audioRef.current?.currentTime ?? 0;
+        seekToSeconds(t + 10);
         return;
       }
       if (e.code === "ArrowUp") {
         e.preventDefault();
-        setVolumeSafe(volume + 0.05);
+        playPrev();
         return;
       }
       if (e.code === "ArrowDown") {
         e.preventDefault();
-        setVolumeSafe(volume - 0.05);
+        playNext();
         return;
       }
       if (e.key === "m" || e.key === "M") {
@@ -700,7 +702,7 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, playPrev, playNext, setVolumeSafe, volume, toggleMute]);
+  }, [togglePlay, playPrev, playNext, seekToSeconds, toggleMute]);
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
