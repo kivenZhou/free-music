@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { api } from "./api";
+import { api, providerLabel } from "./api";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
@@ -22,6 +22,12 @@ function readStoredVolume(): number {
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.85;
 }
 
+function readStoredRepeat(): RepeatMode {
+  const raw = localStorage.getItem("yinzhan-repeat");
+  if (raw === "all" || raw === "one" || raw === "off") return raw;
+  return "off";
+}
+
 function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
   if (list.length <= 1) return [...list];
   const preferred = list[preferIndex] ?? list[0];
@@ -36,7 +42,9 @@ function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
 function App() {
   const [nav, setNav] = useState<NavKey>("charts");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [providerId, setProviderId] = useState("netease");
+  const [providerId, setProviderId] = useState(
+    () => localStorage.getItem("yinzhan-provider") || "netease",
+  );
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [favToken, setFavToken] = useState(0);
   const [searchSeed, setSearchSeed] = useState("");
@@ -50,8 +58,10 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  const [shuffle, setShuffle] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
+  const [shuffle, setShuffle] = useState(
+    () => localStorage.getItem("yinzhan-shuffle") === "1",
+  );
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>(readStoredRepeat);
   const [volume, setVolume] = useState(readStoredVolume);
   const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
   const [queueOpen, setQueueOpen] = useState(false);
@@ -97,10 +107,27 @@ function App() {
   useEffect(() => {
     api.listProviders().then((ps) => {
       setProviders(ps);
-      if (ps[0]) setProviderId(ps[0].id);
+      const saved = localStorage.getItem("yinzhan-provider");
+      if (saved && ps.some((p) => p.id === saved)) {
+        setProviderId(saved);
+      } else if (ps[0]) {
+        setProviderId(ps[0].id);
+      }
     });
     refreshFavorites().catch(() => undefined);
   }, [refreshFavorites]);
+
+  useEffect(() => {
+    localStorage.setItem("yinzhan-provider", providerId);
+  }, [providerId]);
+
+  useEffect(() => {
+    localStorage.setItem("yinzhan-shuffle", shuffle ? "1" : "0");
+  }, [shuffle]);
+
+  useEffect(() => {
+    localStorage.setItem("yinzhan-repeat", repeatMode);
+  }, [repeatMode]);
 
   const applyVolume = useCallback((vol: number, isMuted: boolean) => {
     const audio = audioRef.current;
@@ -256,6 +283,86 @@ function App() {
     [playTrackAt],
   );
 
+  const enqueueNext = useCallback((track: Track) => {
+    const q = queueRef.current;
+    const i = queueIndexRef.current;
+    if (q.length === 0 || i < 0) {
+      void playTrackAtRef.current([track], 0);
+      return;
+    }
+    const next = [...q.slice(0, i + 1), track, ...q.slice(i + 1)];
+    setQueue(next);
+    queueRef.current = next;
+  }, []);
+
+  const addToQueue = useCallback((track: Track) => {
+    const q = queueRef.current;
+    if (q.length === 0 || queueIndexRef.current < 0) {
+      void playTrackAtRef.current([track], 0);
+      return;
+    }
+    const next = [...q, track];
+    setQueue(next);
+    queueRef.current = next;
+  }, []);
+
+  const removeFromQueue = useCallback(
+    (index: number) => {
+      const q = queueRef.current;
+      const i = queueIndexRef.current;
+      if (index < 0 || index >= q.length) return;
+
+      const next = q.filter((_, idx) => idx !== index);
+      if (next.length === 0) {
+        const audio = audioRef.current;
+        if (audio) {
+          audio.pause();
+          audio.removeAttribute("src");
+          audio.load();
+        }
+        setQueue([]);
+        setQueueIndex(-1);
+        queueRef.current = [];
+        queueIndexRef.current = -1;
+        setCurrent(null);
+        setPlaying(false);
+        setProgress(0);
+        setDuration(0);
+        return;
+      }
+
+      if (index === i) {
+        const newIndex = Math.min(index, next.length - 1);
+        void playTrackAt(next, newIndex);
+        return;
+      }
+
+      const newIndex = index < i ? i - 1 : i;
+      setQueue(next);
+      setQueueIndex(newIndex);
+      queueRef.current = next;
+      queueIndexRef.current = newIndex;
+    },
+    [playTrackAt],
+  );
+
+  const clearQueueKeepCurrent = useCallback(() => {
+    const q = queueRef.current;
+    const i = queueIndexRef.current;
+    if (i < 0 || !q[i]) {
+      setQueue([]);
+      setQueueIndex(-1);
+      queueRef.current = [];
+      queueIndexRef.current = -1;
+      return;
+    }
+    const only = [q[i]];
+    setQueue(only);
+    setQueueIndex(0);
+    queueRef.current = only;
+    queueIndexRef.current = 0;
+  }, []);
+
   const playPrev = useCallback(() => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) {
@@ -381,6 +488,66 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay, playPrev, playNext, setVolumeSafe, volume, toggleMute]);
 
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+
+    if (!current) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+
+    const artwork = current.coverUrl
+      ? [{ src: current.coverUrl, sizes: "300x300", type: "image/jpeg" }]
+      : [];
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: current.title,
+      artist: current.artist,
+      album: current.album ?? providerLabel(current.provider),
+      artwork,
+    });
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [current, playing]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+
+    const setHandler = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler | null,
+    ) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // unsupported action on this platform
+      }
+    };
+
+    setHandler("play", () => {
+      const audio = audioRef.current;
+      if (audio) void audio.play().catch(() => undefined);
+    });
+    setHandler("pause", () => {
+      audioRef.current?.pause();
+    });
+    setHandler("previoustrack", () => playPrev());
+    setHandler("nexttrack", () => playNext());
+    setHandler("seekto", (details) => {
+      const audio = audioRef.current;
+      if (!audio || details.seekTime == null) return;
+      audio.currentTime = details.seekTime;
+      setProgress(details.seekTime);
+    });
+
+    return () => {
+      setHandler("play", null);
+      setHandler("pause", null);
+      setHandler("previoustrack", null);
+      setHandler("nexttrack", null);
+      setHandler("seekto", null);
+    };
+  }, [playPrev, playNext]);
+
   const navItems = useMemo(
     () =>
       [
@@ -457,8 +624,11 @@ function App() {
             providerId={providerId}
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
+            playing={playing}
             onPlay={playFromList}
             onPlayAll={playAll}
+            onPlayNext={enqueueNext}
+            onAddToQueue={addToQueue}
             onToggleFavorite={toggleFavorite}
           />
         ) : null}
@@ -466,8 +636,11 @@ function App() {
           <SearchView
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
+            playing={playing}
             onPlay={playFromList}
             onPlayAll={playAll}
+            onPlayNext={enqueueNext}
+            onAddToQueue={addToQueue}
             onToggleFavorite={toggleFavorite}
             initialQuery={searchSeed}
           />
@@ -476,8 +649,11 @@ function App() {
           <FavoritesView
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
+            playing={playing}
             onPlay={playFromList}
             onPlayAll={playAll}
+            onPlayNext={enqueueNext}
+            onAddToQueue={addToQueue}
             onToggleFavorite={toggleFavorite}
             refreshToken={favToken}
           />
@@ -489,8 +665,11 @@ function App() {
         open={queueOpen}
         tracks={queue}
         currentIndex={queueIndex}
+        playing={playing}
         onClose={() => setQueueOpen(false)}
         onSelect={(index) => void playTrackAt(queue, index)}
+        onRemove={removeFromQueue}
+        onClear={clearQueueKeepCurrent}
       />
 
       <PlayerBar

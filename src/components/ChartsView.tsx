@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import { api, providerLabel } from "../api";
 import type { Chart, Track } from "../types";
@@ -8,8 +8,11 @@ interface Props {
   providerId: string;
   favoriteKeys: Set<string>;
   currentKey?: string | null;
+  playing?: boolean;
   onPlay: (track: Track, queue: Track[]) => void;
   onPlayAll: (tracks: Track[]) => void;
+  onPlayNext?: (track: Track) => void;
+  onAddToQueue?: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
 }
 
@@ -22,12 +25,19 @@ const REGION_LABEL: Record<string, string> = {
   youtube: "YT",
 };
 
+function reqKey(provider: string, chartId: string) {
+  return `${provider}::${chartId}`;
+}
+
 export function ChartsView({
   providerId,
   favoriteKeys,
   currentKey,
+  playing,
   onPlay,
   onPlayAll,
+  onPlayNext,
+  onAddToQueue,
   onToggleFavorite,
 }: Props) {
   const [charts, setCharts] = useState<Chart[]>([]);
@@ -36,50 +46,102 @@ export function ChartsView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setCharts([]);
-    setTracks([]);
-    setActive(null);
-    setError(null);
-    let ignore = false;
-    api
-      .listCharts(providerId)
-      .then((list) => {
-        if (ignore) return;
-        setCharts(list);
-        if (list[0]) setActive(list[0].id);
-      })
-      .catch((e) => {
-        if (!ignore) setError(String(e));
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [providerId]);
+  /** Only the latest in-flight request may commit UI state. */
+  const inflightKey = useRef<string | null>(null);
+  const providerEpoch = useRef(0);
 
-  useEffect(() => {
-    if (!active) return;
+  const fetchTracksFor = useCallback(async (provider: string, chartId: string) => {
+    const key = reqKey(provider, chartId);
+    inflightKey.current = key;
     setLoading(true);
     setError(null);
-    let ignore = false;
-    api
-      .chartTracks(active, 40, providerId)
-      .then((res) => {
-        if (!ignore) setTracks(res);
-      })
-      .catch((e) => {
-        if (!ignore) setError(String(e));
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
+    try {
+      const res = await api.chartTracks(chartId, 40, provider);
+      if (inflightKey.current !== key) return;
+      setTracks(res);
+    } catch (e) {
+      if (inflightKey.current !== key) return;
+      // Keep previous list on transient Bilibili failures (rate-limit / decode errors)
+      setError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      if (inflightKey.current === key) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  // Remount-safe provider bootstrap
+  useEffect(() => {
+    const epoch = ++providerEpoch.current;
+    const forProvider = providerId;
+
+    setCharts([]);
+    setActive(null);
+    setTracks([]);
+    setError(null);
+    setLoading(true);
+    inflightKey.current = null;
+
+    (async () => {
+      try {
+        const list = await api.listCharts(forProvider);
+        if (epoch !== providerEpoch.current) return;
+
+        setCharts(list);
+        const firstId = list[0]?.id ?? null;
+        setActive(firstId);
+
+        if (!firstId) {
+          setTracks([]);
+          setLoading(false);
+          return;
+        }
+
+        await fetchTracksFor(forProvider, firstId);
+      } catch (e) {
+        if (epoch !== providerEpoch.current) return;
+        setCharts([]);
+        setTracks([]);
+        setActive(null);
+        setError(String(e).replace(/^Error:\s*/, ""));
+        setLoading(false);
+      }
+    })();
 
     return () => {
-      ignore = true;
+      providerEpoch.current += 1;
+      inflightKey.current = null;
     };
-  }, [active, providerId]);
+  }, [providerId, fetchTracksFor]);
+
+  const debounceRef = useRef<number | null>(null);
+
+  const selectChart = useCallback(
+    (chartId: string) => {
+      if (chartId === active && loading) return;
+      setActive(chartId);
+      setError(null);
+      if (debounceRef.current != null) {
+        window.clearTimeout(debounceRef.current);
+      }
+      // Debounce rapid tab clicks so we don't queue up Bilibili API calls
+      debounceRef.current = window.setTimeout(() => {
+        void fetchTracksFor(providerId, chartId);
+      }, 280);
+    },
+    [active, loading, fetchTracksFor, providerId],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current != null) {
+        window.clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
 
   const current = charts.find((c) => c.id === active);
+  const showList = !loading || tracks.length > 0;
 
   return (
     <section className="panel">
@@ -89,9 +151,13 @@ export function ChartsView({
           <h1>榜单</h1>
           {current ? <p className="panel-desc">{current.description}</p> : null}
         </div>
-        {!loading && tracks.length > 0 ? (
-          <div className="panel-actions">
+        <div className="panel-actions">
+          {loading ? (
+            <span className="panel-head-meta">加载中…</span>
+          ) : tracks.length > 0 ? (
             <span className="panel-head-meta">{tracks.length} 首可播</span>
+          ) : null}
+          {!loading && tracks.length > 0 ? (
             <button
               type="button"
               className="play-all-btn"
@@ -100,8 +166,17 @@ export function ChartsView({
               <Play size={14} fill="currentColor" />
               全部播放
             </button>
-          </div>
-        ) : null}
+          ) : null}
+          {!loading && tracks.length === 0 && active ? (
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => void fetchTracksFor(providerId, active)}
+            >
+              重新加载
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="chart-tabs">
@@ -110,7 +185,7 @@ export function ChartsView({
             key={c.id}
             type="button"
             className={`chart-tab ${active === c.id ? "on" : ""}`}
-            onClick={() => setActive(c.id)}
+            onClick={() => selectChart(c.id)}
           >
             {c.name}
             <span>{REGION_LABEL[c.region] ?? c.region}</span>
@@ -119,16 +194,23 @@ export function ChartsView({
       </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
-      {loading ? <div className="empty">正在加载可免费完整播放的歌曲…</div> : null}
-      {!loading ? (
-        <SongList
-          tracks={tracks}
-          currentKey={currentKey}
-          favoriteKeys={favoriteKeys}
-          onPlay={onPlay}
-          onToggleFavorite={onToggleFavorite}
-          hideProvider
-        />
+      {loading && tracks.length === 0 ? (
+        <div className="empty">正在加载可免费完整播放的歌曲…</div>
+      ) : null}
+      {showList && !(loading && tracks.length === 0) ? (
+        <div className={loading ? "list-dim" : undefined}>
+          <SongList
+            tracks={tracks}
+            currentKey={currentKey}
+            playing={playing}
+            favoriteKeys={favoriteKeys}
+            onPlay={onPlay}
+            onPlayNext={onPlayNext}
+            onAddToQueue={onAddToQueue}
+            onToggleFavorite={onToggleFavorite}
+            hideProvider
+          />
+        </div>
       ) : null}
     </section>
   );

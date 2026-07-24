@@ -7,8 +7,11 @@ import { SongList } from "./SongList";
 interface Props {
   favoriteKeys: Set<string>;
   currentKey?: string | null;
+  playing?: boolean;
   onPlay: (track: Track, queue: Track[]) => void;
   onPlayAll: (tracks: Track[]) => void;
+  onPlayNext?: (track: Track) => void;
+  onAddToQueue?: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
   initialQuery?: string;
 }
@@ -16,8 +19,11 @@ interface Props {
 export function SearchView({
   favoriteKeys,
   currentKey,
+  playing,
   onPlay,
   onPlayAll,
+  onPlayNext,
+  onAddToQueue,
   onToggleFavorite,
   initialQuery = "",
 }: Props) {
@@ -120,8 +126,11 @@ export function SearchView({
         <SongList
           tracks={tracks}
           currentKey={currentKey}
+          playing={playing}
           favoriteKeys={favoriteKeys}
           onPlay={onPlay}
+          onPlayNext={onPlayNext}
+          onAddToQueue={onAddToQueue}
           onToggleFavorite={onToggleFavorite}
         />
       ) : null}

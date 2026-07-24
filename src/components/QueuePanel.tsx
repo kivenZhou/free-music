@@ -1,14 +1,16 @@
 import type { Track } from "../types";
 import { formatDuration, providerLabel } from "../api";
-import { ListMusic, X } from "lucide-react";
+import { ListMusic, Trash2, X } from "lucide-react";
 
 interface Props {
   open: boolean;
   tracks: Track[];
   currentIndex: number;
+  playing?: boolean;
   onClose: () => void;
   onSelect: (index: number) => void;
-  onClear?: () => void;
+  onRemove: (index: number) => void;
+  onClear: () => void;
 }
 
 function keyOf(t: Track) {
@@ -19,8 +21,11 @@ export function QueuePanel({
   open,
   tracks,
   currentIndex,
+  playing = false,
   onClose,
   onSelect,
+  onRemove,
+  onClear,
 }: Props) {
   if (!open) return null;
 
@@ -32,9 +37,22 @@ export function QueuePanel({
           <span>播放队列</span>
           <span className="queue-count">{tracks.length}</span>
         </div>
-        <button type="button" className="icon-btn" onClick={onClose} title="关闭">
-          <X size={16} />
-        </button>
+        <div className="queue-head-actions">
+          {tracks.length > 0 ? (
+            <button
+              type="button"
+              className="ghost-btn queue-clear"
+              onClick={onClear}
+              title="清空队列（保留当前）"
+            >
+              <Trash2 size={13} />
+              清空
+            </button>
+          ) : null}
+          <button type="button" className="icon-btn" onClick={onClose} title="关闭">
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {tracks.length === 0 ? (
@@ -45,22 +63,42 @@ export function QueuePanel({
             const active = i === currentIndex;
             return (
               <li key={`${keyOf(t)}-${i}`}>
-                <button
-                  type="button"
-                  className={`queue-row ${active ? "active" : ""}`}
-                  onClick={() => onSelect(i)}
-                >
-                  <span className="queue-idx">
-                    {active ? "▶" : String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span className="queue-meta">
-                    <span className="queue-song">{t.title}</span>
-                    <span className="queue-artist">
-                      {t.artist} · {providerLabel(t.provider)}
+                <div className={`queue-row ${active ? "active" : ""}`}>
+                  <button
+                    type="button"
+                    className="queue-main"
+                    onClick={() => onSelect(i)}
+                  >
+                    <span className="queue-idx">
+                      {active && playing ? (
+                        <span className="eq compact" aria-label="正在播放">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                      ) : active ? (
+                        "▶"
+                      ) : (
+                        String(i + 1).padStart(2, "0")
+                      )}
                     </span>
-                  </span>
-                  <span className="queue-dur">{formatDuration(t.durationMs)}</span>
-                </button>
+                    <span className="queue-meta">
+                      <span className="queue-song">{t.title}</span>
+                      <span className="queue-artist">
+                        {t.artist} · {providerLabel(t.provider)}
+                      </span>
+                    </span>
+                    <span className="queue-dur">{formatDuration(t.durationMs)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn queue-remove"
+                    title="从队列移除"
+                    onClick={() => onRemove(i)}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </li>
             );
           })}
