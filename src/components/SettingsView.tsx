@@ -246,7 +246,9 @@ export function SettingsView({
       <div className="settings-block muted">
         <h2>关于</h2>
         <p className="settings-desc">
-          音栈 YinZhan · 仅聚合免费可完整播放的音源
+          音栈 YinZhan · 学习与个人使用
+          <br />
+          仅请求各站已开放的免费完整流；不破解会员、不绕过版权保护，也不托管或分发音源文件。与各音源平台无隶属或授权关系，请遵守平台条款与当地法律。
           <br />
           关闭窗口会隐藏到菜单栏托盘；托盘图标可重新打开，右键可退出。
         </p>
