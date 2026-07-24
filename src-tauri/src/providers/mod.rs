@@ -3,12 +3,14 @@ mod bilibili;
 mod kugou;
 mod kuwo;
 mod netease;
+mod qq;
 
 pub use audius::AudiusProvider;
 pub use bilibili::BilibiliProvider;
 pub use kugou::KugouProvider;
 pub use kuwo::KuwoProvider;
 pub use netease::NeteaseProvider;
+pub use qq::QqProvider;
 
 use crate::models::{Chart, PlayUrl, Track};
 use async_trait::async_trait;
@@ -99,6 +101,7 @@ impl ProviderRegistry {
             providers: vec![
                 // Default / primary: 网易云 (matches UI + README)
                 Box::new(NeteaseProvider::new(audio.join("netease"))),
+                Box::new(QqProvider::new(audio.join("qq"))),
                 Box::new(BilibiliProvider::new(audio.join("bilibili"))),
                 Box::new(KugouProvider::new(audio.join("kugou"))),
                 Box::new(KuwoProvider::new(audio.join("kuwo"))),
