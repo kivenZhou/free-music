@@ -18,7 +18,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { TrendingUp, Search, Heart, History, Settings, ListMusic } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
-import { checkForAppUpdate } from "./updater";
+import { checkForInstallableUpdate } from "./updater";
 import "./App.css";
 
 const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
@@ -158,11 +158,11 @@ function App() {
     localStorage.setItem("yinzhan-auto-skip", autoSkip ? "1" : "0");
   }, [autoSkip]);
 
-  // Quietly check GitHub Releases a few seconds after launch.
+  // Quietly check for a signed installable update a few seconds after launch.
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void checkForAppUpdate().then((update) => {
+      void checkForInstallableUpdate().then((update) => {
         if (!cancelled && update) setPendingUpdate(update);
       });
     }, 2500);
@@ -676,22 +676,24 @@ function App() {
       }
       if (e.code === "ArrowLeft") {
         e.preventDefault();
-        playPrev();
+        const t = audioRef.current?.currentTime ?? 0;
+        seekToSeconds(t - 10);
         return;
       }
       if (e.code === "ArrowRight") {
         e.preventDefault();
-        playNext();
+        const t = audioRef.current?.currentTime ?? 0;
+        seekToSeconds(t + 10);
         return;
       }
       if (e.code === "ArrowUp") {
         e.preventDefault();
-        setVolumeSafe(volume + 0.05);
+        playPrev();
         return;
       }
       if (e.code === "ArrowDown") {
         e.preventDefault();
-        setVolumeSafe(volume - 0.05);
+        playNext();
         return;
       }
       if (e.key === "m" || e.key === "M") {
@@ -700,7 +702,7 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, playPrev, playNext, setVolumeSafe, volume, toggleMute]);
+  }, [togglePlay, playPrev, playNext, seekToSeconds, toggleMute]);
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
