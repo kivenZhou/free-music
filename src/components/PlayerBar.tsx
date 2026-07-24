@@ -15,6 +15,9 @@ import {
   Volume2,
   VolumeX,
   ListMusic,
+  Mic2,
+  PanelBottom,
+  Maximize2,
 } from "lucide-react";
 
 interface Props {
@@ -33,6 +36,8 @@ interface Props {
   muted: boolean;
   queueOpen: boolean;
   queueLength: number;
+  lyricsOpen: boolean;
+  mini: boolean;
   onToggle: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -43,6 +48,8 @@ interface Props {
   onVolume: (v: number) => void;
   onToggleMute: () => void;
   onToggleQueue: () => void;
+  onToggleLyrics: () => void;
+  onToggleMini: () => void;
 }
 
 function fmt(sec: number) {
@@ -94,6 +101,8 @@ export function PlayerBar({
   muted,
   queueOpen,
   queueLength,
+  lyricsOpen,
+  mini,
   onToggle,
   onPrev,
   onNext,
@@ -104,6 +113,8 @@ export function PlayerBar({
   onVolume,
   onToggleMute,
   onToggleQueue,
+  onToggleLyrics,
+  onToggleMini,
 }: Props) {
   const ratio = duration > 0 ? progress / duration : 0;
   const shownVolume = muted ? 0 : volume;
@@ -226,6 +237,16 @@ export function PlayerBar({
         </div>
 
         <button
+          className={`ctrl-btn ${lyricsOpen ? "on" : ""}`}
+          type="button"
+          disabled={!track}
+          onClick={onToggleLyrics}
+          title="歌词"
+        >
+          <Mic2 size={16} />
+        </button>
+
+        <button
           className={`ctrl-btn queue-btn ${queueOpen ? "on" : ""}`}
           type="button"
           onClick={onToggleQueue}
@@ -233,6 +254,15 @@ export function PlayerBar({
         >
           <ListMusic size={16} />
           {queueLength > 0 ? <span className="queue-badge">{queueLength}</span> : null}
+        </button>
+
+        <button
+          className={`ctrl-btn mini-toggle ${mini ? "on" : ""}`}
+          type="button"
+          onClick={onToggleMini}
+          title={mini ? "还原窗口" : "迷你置顶窗"}
+        >
+          {mini ? <Maximize2 size={15} /> : <PanelBottom size={15} />}
         </button>
       </div>
     </footer>

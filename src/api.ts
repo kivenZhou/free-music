@@ -34,12 +34,25 @@ export const api = {
     invoke<boolean>("is_favorite", { provider, trackId }),
   getCacheStats: () => invoke<CacheStats>("get_cache_stats"),
   clearAudioCache: () => invoke<CacheStats>("clear_audio_cache"),
+  fetchLyrics: (track: Track) =>
+    invoke<LyricsPayload>("fetch_lyrics", {
+      trackId: track.id,
+      provider: track.provider,
+      title: track.title,
+      artist: track.artist,
+    }),
 };
 
 export interface CacheStats {
   sizeBytes: number;
   fileCount: number;
   path: string;
+}
+
+export interface LyricsPayload {
+  lrc?: string | null;
+  translatedLrc?: string | null;
+  source: string;
 }
 
 export function formatDuration(ms?: number | null): string {

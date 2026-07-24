@@ -39,6 +39,7 @@ pub fn run() {
             commands::is_favorite,
             commands::get_cache_stats,
             commands::clear_audio_cache,
+            commands::fetch_lyrics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -205,3 +205,36 @@ pub fn get_cache_stats(state: State<'_, Arc<AppState>>) -> CacheStats {
 pub fn clear_audio_cache(state: State<'_, Arc<AppState>>) -> Result<CacheStats, String> {
     cache::clear_all(&state.cache_dir)
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsPayload {
+    pub lrc: Option<String>,
+    pub translated_lrc: Option<String>,
+    pub source: String,
+}
+
+#[tauri::command]
+pub async fn fetch_lyrics(
+    state: State<'_, Arc<AppState>>,
+    track_id: String,
+    provider: String,
+    title: Option<String>,
+    artist: Option<String>,
+) -> Result<LyricsPayload, String> {
+    let (lrc, translated_lrc, source) = state
+        .providers
+        .resolve_lyrics(
+            &track_id,
+            &provider,
+            title.as_deref(),
+            artist.as_deref(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(LyricsPayload {
+        lrc,
+        translated_lrc,
+        source,
+    })
+}

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, formatBytes, providerLabel } from "./api";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
+import { LyricsPanel, mergeLyrics, type LyricLine } from "./components/LyricsPanel";
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
@@ -11,8 +14,28 @@ import { TrendingUp, Search, Heart, History } from "lucide-react";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import "./App.css";
 
+const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
+const NORMAL_MIN = { width: 900, height: 600 };
+const MINI_SIZE = { width: 480, height: 96 };
+
 function favKey(t: Track) {
   return `${t.provider}:${t.id}`;
+}
+
+function loadStoredQueue(): { tracks: Track[]; index: number } | null {
+  try {
+    const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as { tracks?: Track[]; index?: number };
+    if (!Array.isArray(data.tracks) || data.tracks.length === 0) return null;
+    const index = Math.min(
+      Math.max(0, Number(data.index) || 0),
+      data.tracks.length - 1,
+    );
+    return { tracks: data.tracks, index };
+  } catch {
+    return null;
+  }
 }
 
 function readStoredVolume(): number {
@@ -40,6 +63,7 @@ function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
 }
 
 function App() {
+  const storedQueue = useMemo(() => loadStoredQueue(), []);
   const [nav, setNav] = useState<NavKey>("charts");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerId, setProviderId] = useState(
@@ -49,9 +73,14 @@ function App() {
   const [favToken, setFavToken] = useState(0);
   const [searchSeed, setSearchSeed] = useState("");
 
-  const [queue, setQueue] = useState<Track[]>([]);
-  const [queueIndex, setQueueIndex] = useState(-1);
-  const [current, setCurrent] = useState<Track | null>(null);
+  const [queue, setQueue] = useState<Track[]>(() => storedQueue?.tracks ?? []);
+  const [queueIndex, setQueueIndex] = useState(() => storedQueue?.index ?? -1);
+  const [current, setCurrent] = useState<Track | null>(
+    () =>
+      storedQueue && storedQueue.index >= 0
+        ? storedQueue.tracks[storedQueue.index] ?? null
+        : null,
+  );
   const [playing, setPlaying] = useState(false);
   const [loadingPlay, setLoadingPlay] = useState(false);
   const [playError, setPlayError] = useState<string | null>(null);
@@ -65,16 +94,24 @@ function App() {
   const [volume, setVolume] = useState(readStoredVolume);
   const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
   const [queueOpen, setQueueOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [lyricsError, setLyricsError] = useState<string | null>(null);
+  const [mini, setMini] = useState(false);
   const [cacheLabel, setCacheLabel] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
 
+  const queueReadyRef = useRef(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const queueRef = useRef<Track[]>([]);
-  const queueIndexRef = useRef(-1);
+  const queueRef = useRef<Track[]>(storedQueue?.tracks ?? []);
+  const queueIndexRef = useRef(storedQueue?.index ?? -1);
   const shuffleRef = useRef(false);
   const repeatRef = useRef<RepeatMode>("off");
   const playGenRef = useRef(0);
   const failSkipRef = useRef(0);
+  const normalSizeRef = useRef({ width: 1180, height: 760 });
   const playTrackAtRef = useRef<(tracks: Track[], index: number) => void>(() => undefined);
   const advanceRef = useRef<(dir: 1 | -1, opts?: { fromEnded?: boolean }) => void>(
     () => undefined,
@@ -106,6 +143,13 @@ function App() {
     const list = await api.listFavorites();
     setFavoriteKeys(new Set(list.map((i) => favKey(i.track))));
     setFavToken((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    // Keep normal-mode floor after allowing smaller mini window in conf.
+    void getCurrentWindow()
+      .setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -156,6 +200,50 @@ function App() {
   useEffect(() => {
     localStorage.setItem("yinzhan-repeat", repeatMode);
   }, [repeatMode]);
+
+  useEffect(() => {
+    // Skip the first paint so we don't wipe a just-restored empty write.
+    if (!queueReadyRef.current) {
+      queueReadyRef.current = true;
+      return;
+    }
+    if (queue.length === 0) {
+      localStorage.removeItem(QUEUE_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      QUEUE_STORAGE_KEY,
+      JSON.stringify({ tracks: queue, index: queueIndex }),
+    );
+  }, [queue, queueIndex]);
+
+  useEffect(() => {
+    if (!lyricsOpen || !current) {
+      return;
+    }
+    let cancelled = false;
+    const track = current;
+    setLyricsLoading(true);
+    setLyricsError(null);
+    setLyricLines([]);
+    api
+      .fetchLyrics(track)
+      .then((payload) => {
+        if (cancelled) return;
+        setLyricLines(mergeLyrics(payload.lrc, payload.translatedLrc));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setLyricsError(String(e).replace(/^Error:\s*/, ""));
+        setLyricLines([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLyricsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lyricsOpen, current]);
 
   const applyVolume = useCallback((vol: number, isMuted: boolean) => {
     const audio = audioRef.current;
@@ -433,6 +521,11 @@ function App() {
     const audio = audioRef.current;
     if (!audio || !current) return;
     if (audio.paused) {
+      // After restart the queue is restored but audio.src is empty.
+      if (!audio.getAttribute("src") && queueRef.current.length > 0 && queueIndexRef.current >= 0) {
+        void playTrackAtRef.current(queueRef.current, queueIndexRef.current);
+        return;
+      }
       void audio.play().catch(() => setPlayError("无法继续播放"));
     } else {
       audio.pause();
@@ -452,6 +545,42 @@ function App() {
     },
     [current],
   );
+
+  const seekToSeconds = useCallback((sec: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, sec);
+    setProgress(audio.currentTime);
+  }, []);
+
+  const toggleMini = useCallback(async () => {
+    const win = getCurrentWindow();
+    try {
+      if (!mini) {
+        const size = await win.innerSize();
+        const factor = await win.scaleFactor();
+        normalSizeRef.current = {
+          width: Math.round(size.width / factor),
+          height: Math.round(size.height / factor),
+        };
+        await win.setMinSize(new LogicalSize(360, 88));
+        await win.setSize(new LogicalSize(MINI_SIZE.width, MINI_SIZE.height));
+        await win.setAlwaysOnTop(true);
+        setQueueOpen(false);
+        setLyricsOpen(false);
+        setMini(true);
+      } else {
+        await win.setAlwaysOnTop(false);
+        await win.setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height));
+        await win.setSize(
+          new LogicalSize(normalSizeRef.current.width, normalSizeRef.current.height),
+        );
+        setMini(false);
+      }
+    } catch (e) {
+      setPlayError(String(e).replace(/^Error:\s*/, ""));
+    }
+  }, [mini]);
 
   const toggleFavorite = useCallback(
     async (track: Track) => {
@@ -612,7 +741,9 @@ function App() {
   );
 
   return (
-    <div className="app">
+    <div className={`app ${mini ? "mini" : ""}`}>
+      {!mini ? (
+        <>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-name">音栈</div>
@@ -726,9 +857,11 @@ function App() {
           <HistoryView onSearch={goSearch} active={nav === "history"} />
         </div>
       </main>
+        </>
+      ) : null}
 
       <QueuePanel
-        open={queueOpen}
+        open={!mini && queueOpen}
         tracks={queue}
         currentIndex={queueIndex}
         playing={playing}
@@ -736,6 +869,17 @@ function App() {
         onSelect={(index) => void playTrackAt(queue, index)}
         onRemove={removeFromQueue}
         onClear={clearQueueKeepCurrent}
+      />
+
+      <LyricsPanel
+        open={!mini && lyricsOpen}
+        track={current}
+        progress={progress}
+        lines={lyricLines}
+        loading={lyricsLoading}
+        error={lyricsError}
+        onClose={() => setLyricsOpen(false)}
+        onSeek={seekToSeconds}
       />
 
       <PlayerBar
@@ -754,6 +898,8 @@ function App() {
         muted={muted}
         queueOpen={queueOpen}
         queueLength={queue.length}
+        lyricsOpen={lyricsOpen}
+        mini={mini}
         onToggle={togglePlay}
         onPrev={playPrev}
         onNext={playNext}
@@ -765,7 +911,15 @@ function App() {
         onCycleRepeat={cycleRepeat}
         onVolume={setVolumeSafe}
         onToggleMute={toggleMute}
-        onToggleQueue={() => setQueueOpen((o) => !o)}
+        onToggleQueue={() => {
+          setLyricsOpen(false);
+          setQueueOpen((o) => !o);
+        }}
+        onToggleLyrics={() => {
+          setQueueOpen(false);
+          setLyricsOpen((o) => !o);
+        }}
+        onToggleMini={() => void toggleMini()}
       />
     </div>
   );

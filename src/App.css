@@ -1150,6 +1150,219 @@ button {
   border-radius: 3px;
 }
 
+/* ─── Lyrics panel ──────────────────────────────────── */
+
+.lyrics-panel {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--player-h) + 12px);
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(460px, calc(100vh - var(--player-h) - 40px));
+  display: flex;
+  flex-direction: column;
+  background: #1a1714;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+  overflow: hidden;
+  animation: slideUp 0.2s ease both;
+}
+
+.lyrics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 12px 10px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.lyrics-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.lyrics-head > .icon-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.lyrics-song {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.lyrics-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 20px 12px 28px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 12%,
+    #000 88%,
+    transparent
+  );
+}
+
+.lyrics-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.lyrics-empty.error {
+  color: var(--danger);
+}
+
+.lyrics-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lyric-line {
+  width: 100%;
+  text-align: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.lyric-line:hover {
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lyric-line.past {
+  color: rgba(243, 239, 232, 0.28);
+}
+
+.lyric-line.on {
+  color: var(--accent);
+  transform: scale(1.04);
+  background: rgba(232, 168, 74, 0.08);
+}
+
+.lyric-text {
+  display: block;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.lyric-line.on .lyric-text {
+  font-weight: 600;
+}
+
+.lyric-trans {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* ─── Mini player window ────────────────────────────── */
+
+.app.mini {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app.mini .player {
+  grid-row: 1;
+  grid-column: 1;
+  position: relative;
+  inset: auto;
+  height: 100%;
+  min-height: 0;
+  border-top: 0;
+  border-radius: 0;
+  padding: 6px 10px;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.app.mini .player-cover,
+.app.mini .player-cover.placeholder {
+  width: 40px;
+  height: 40px;
+}
+
+.app.mini .player-title {
+  font-size: 0.88rem;
+}
+
+.app.mini .player-artist {
+  font-size: 0.72rem;
+}
+
+.app.mini .player-controls {
+  gap: 2px;
+  width: auto;
+}
+
+.app.mini .seek,
+.app.mini .volume-wrap,
+.app.mini .player-error,
+.app.mini .queue-btn {
+  display: none !important;
+}
+
+/* Narrow responsive rules hide aside — keep expand button in mini. */
+.app.mini .player-aside {
+  display: flex !important;
+  justify-self: end;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
+
+.app.mini .player-aside .ctrl-btn:not(.mini-toggle) {
+  display: none;
+}
+
+.app.mini .mini-toggle {
+  display: grid !important;
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+  background: rgba(232, 168, 74, 0.14);
+}
+
+.app.mini .transport .ctrl-btn:first-child,
+.app.mini .transport .ctrl-btn:last-child {
+  display: none;
+}
+
 .queue-row {
   display: flex;
   align-items: center;

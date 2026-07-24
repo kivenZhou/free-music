@@ -233,6 +233,31 @@ impl NeteaseProvider {
         Ok(path)
     }
 
+    async fn fetch_lyrics(&self, track_id: &str) -> Result<(Option<String>, Option<String>), ProviderError> {
+        let url = format!(
+            "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1",
+            track_id
+        );
+        let resp = self.client.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+        let lrc = json
+            .pointer("/lrc/lyric")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let tlyric = json
+            .pointer("/tlyric/lyric")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        if lrc.is_none() && tlyric.is_none() {
+            return Err(ProviderError::Msg("未找到歌词".into()));
+        }
+        Ok((lrc, tlyric))
+    }
+
     async fn resolve_play_candidates(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
         // 1) Official API
         if let Some((remote, br)) = self.fetch_official_url(track_id).await? {
@@ -383,5 +408,12 @@ impl MusicProvider for NeteaseProvider {
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
         self.resolve_play_candidates(track_id).await
+    }
+
+    async fn lyrics(
+        &self,
+        track_id: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        self.fetch_lyrics(track_id).await
     }
 }

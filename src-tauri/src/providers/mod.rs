@@ -34,6 +34,13 @@ pub trait MusicProvider: Send + Sync {
     async fn charts(&self) -> Result<Vec<Chart>, ProviderError>;
     async fn chart_tracks(&self, chart_id: &str, limit: u32) -> Result<Vec<Track>, ProviderError>;
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError>;
+    /// Optional synced lyrics (LRC). Default: unsupported.
+    async fn lyrics(
+        &self,
+        _track_id: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        Err(ProviderError::Msg("该音源暂不支持歌词".into()))
+    }
 }
 
 fn normalize_text(s: &str) -> String {
@@ -197,5 +204,47 @@ impl ProviderRegistry {
         Err(ProviderError::Msg(
             "所有音源均无免费完整播放地址".into(),
         ))
+    }
+
+    pub async fn resolve_lyrics(
+        &self,
+        track_id: &str,
+        provider: &str,
+        hint_title: Option<&str>,
+        hint_artist: Option<&str>,
+    ) -> Result<(Option<String>, Option<String>, String), ProviderError> {
+        if provider == "netease" {
+            if let Some(p) = self.get("netease") {
+                if let Ok((lrc, tlyric)) = p.lyrics(track_id).await {
+                    return Ok((lrc, tlyric, "netease".into()));
+                }
+            }
+        }
+
+        let title = hint_title.filter(|s| !s.is_empty()).ok_or_else(|| {
+            ProviderError::Msg("缺少曲名，无法匹配歌词".into())
+        })?;
+        let netease = self
+            .get("netease")
+            .ok_or_else(|| ProviderError::Msg("网易云音源不可用".into()))?;
+        let q = match hint_artist.filter(|s| !s.is_empty()) {
+            Some(a) => format!("{title} {a}"),
+            None => title.to_string(),
+        };
+        let tracks = netease.search(&q, 8).await?;
+        for t in tracks {
+            if !titles_similar(title, &t.title) {
+                continue;
+            }
+            if let Some(artist) = hint_artist.filter(|s| !s.is_empty()) {
+                if !artists_similar(artist, &t.artist) {
+                    continue;
+                }
+            }
+            if let Ok((lrc, tlyric)) = netease.lyrics(&t.id).await {
+                return Ok((lrc, tlyric, "netease".into()));
+            }
+        }
+        Err(ProviderError::Msg("未找到匹配歌词".into()))
     }
 }
