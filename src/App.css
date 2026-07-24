@@ -100,9 +100,11 @@ button {
   grid-row: 1 / 2;
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 28px 16px 20px;
-  background: var(--bg-sidebar);
+  gap: 26px;
+  padding: 28px 16px 18px;
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(232, 168, 74, 0.08), transparent 55%),
+    var(--bg-sidebar);
   border-right: 1px solid var(--line);
   overflow-y: auto;
   min-height: 0;
@@ -113,7 +115,7 @@ button {
 }
 
 .brand {
-  padding: 0 8px;
+  padding: 0 10px 2px;
 }
 
 .brand-name {
@@ -126,19 +128,21 @@ button {
 }
 
 .brand-tag {
-  margin-top: 6px;
+  margin-top: 8px;
   font-family: var(--font-display);
   font-size: 0.65rem;
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent);
+  opacity: 0.9;
 }
 
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  flex: 1;
 }
 
 .nav-item {
@@ -152,7 +156,8 @@ button {
   padding: 10px 12px;
   border-radius: var(--radius);
   text-align: left;
-  transition: background 0.15s ease, color 0.15s ease;
+  position: relative;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .nav-item:hover {
@@ -163,6 +168,7 @@ button {
 .nav-item.on {
   color: var(--text);
   background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .nav-item.on svg {
@@ -179,18 +185,33 @@ button {
 .nav-zh {
   font-size: 0.95rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .nav-en {
   font-family: var(--font-display);
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 
 .nav-item.on .nav-en {
   color: rgba(232, 168, 74, 0.75);
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: 8px 12px 0;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  border-top: 1px solid var(--line);
+}
+
+.chart-providers {
+  margin: 0 0 14px;
 }
 
 .source-block {

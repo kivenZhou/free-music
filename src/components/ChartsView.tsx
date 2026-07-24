@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import { api, providerLabel } from "../api";
-import type { Chart, Track } from "../types";
+import type { Chart, ProviderInfo, Track } from "../types";
 import { SongList } from "./SongList";
 
 interface Props {
   providerId: string;
+  providers: ProviderInfo[];
+  onProviderId: (id: string) => void;
   favoriteKeys: Set<string>;
   currentKey?: string | null;
   playing?: boolean;
@@ -33,6 +35,8 @@ function reqKey(provider: string, chartId: string) {
 
 export function ChartsView({
   providerId,
+  providers,
+  onProviderId,
   favoriteKeys,
   currentKey,
   playing,
@@ -182,6 +186,21 @@ export function ChartsView({
           ) : null}
         </div>
       </header>
+
+      {providers.length > 0 ? (
+        <div className="provider-filter chart-providers" role="tablist" aria-label="音源">
+          {providers.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`chip ${providerId === p.id ? "on" : ""}`}
+              onClick={() => onProviderId(p.id)}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="chart-tabs">
         {charts.map((c) => (

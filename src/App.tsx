@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, formatBytes, providerLabel } from "./api";
+import { api, providerLabel } from "./api";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
@@ -106,8 +106,6 @@ function App() {
   const [mini, setMini] = useState(
     () => localStorage.getItem("yinzhan-mini") === "1",
   );
-  const [cacheLabel, setCacheLabel] = useState<string | null>(null);
-  const [clearingCache, setClearingCache] = useState(false);
   const [autoSkip, setAutoSkip] = useState(
     () => localStorage.getItem("yinzhan-auto-skip") !== "0",
   );
@@ -196,31 +194,7 @@ function App() {
       }
     });
     refreshFavorites().catch(() => undefined);
-    api
-      .getCacheStats()
-      .then((s) => {
-        if (s.fileCount > 0) {
-          setCacheLabel(`${formatBytes(s.sizeBytes)} · ${s.fileCount} 文件`);
-        }
-      })
-      .catch(() => undefined);
   }, [refreshFavorites]);
-
-  const clearCache = useCallback(async () => {
-    if (clearingCache) return;
-    setClearingCache(true);
-    try {
-      const s = await api.clearAudioCache();
-      setCacheLabel(s.fileCount > 0 ? `${formatBytes(s.sizeBytes)} · ${s.fileCount} 文件` : "已清空");
-      window.setTimeout(() => {
-        setCacheLabel(null);
-      }, 2500);
-    } catch (e) {
-      setPlayError(String(e));
-    } finally {
-      setClearingCache(false);
-    }
-  }, [clearingCache]);
 
   useEffect(() => {
     localStorage.setItem("yinzhan-provider", providerId);
@@ -314,19 +288,6 @@ function App() {
       await audio.play();
       if (gen !== playGenRef.current) return;
       failSkipRef.current = 0;
-      // Refresh cache label occasionally after stream-backed plays
-      if (!resolved.localPath) {
-        window.setTimeout(() => {
-          api
-            .getCacheStats()
-            .then((s) => {
-              if (s.fileCount > 0) {
-                setCacheLabel(`${formatBytes(s.sizeBytes)} · ${s.fileCount} 文件`);
-              }
-            })
-            .catch(() => undefined);
-        }, 4000);
-      }
     } catch (e) {
       if (gen !== playGenRef.current) return;
       setPlaying(false);
@@ -825,49 +786,15 @@ function App() {
           })}
         </nav>
 
-        {nav === "charts" ? (
-          <div className="source-block">
-            <div className="source-label">音源</div>
-            <div className="source-list">
-              {providers.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`source-btn ${providerId === p.id ? "on" : ""}`}
-                  onClick={() => setProviderId(p.id)}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="source-block" aria-hidden />
-        )}
-
-        <div className="sidebar-foot">
-          <div>仅免费完整曲目</div>
-          {queue.length > 0 ? (
-            <div>
-              队列 {Math.max(queueIndex + 1, 0)} / {queue.length}
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="ghost-btn cache-clear-btn"
-            disabled={clearingCache}
-            onClick={() => void clearCache()}
-            title={cacheLabel ?? "清除本地音频缓存"}
-          >
-            {clearingCache ? "清理中…" : cacheLabel ? `清缓存 (${cacheLabel})` : "清除缓存"}
-          </button>
-        </div>
+        <div className="sidebar-foot">仅免费完整曲目</div>
       </aside>
 
       <main className="main">
         <div className={`view-pane ${nav === "charts" ? "on" : ""}`}>
           <ChartsView
             providerId={providerId}
+            providers={providers}
+            onProviderId={setProviderId}
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             playing={playing}
