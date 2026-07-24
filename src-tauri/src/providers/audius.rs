@@ -5,7 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::path::PathBuf;
 
-const UA: &str = "YinZhan/0.1.1 (https://github.com/kivenZhou/free-music; personal, non-commercial)";
+const UA: &str = "YinZhan/0.1.2 (https://github.com/kivenZhou/free-music; personal, non-commercial)";
 const APP_NAME: &str = "yinzhan";
 const API: &str = "https://api.audius.co";
 
