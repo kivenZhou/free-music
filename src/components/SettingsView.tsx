@@ -5,6 +5,8 @@ import { api, formatBytes, type CacheStats } from "../api";
 import type { ProviderInfo } from "../types";
 import { checkForAppUpdate, installAppUpdate, type UpdateProgress } from "../updater";
 
+type ToastTone = "ok" | "warn" | "err";
+
 interface Props {
   providers: ProviderInfo[];
   providerId: string;
@@ -26,20 +28,31 @@ export function SettingsView({
 }: Props) {
   const [cache, setCache] = useState<CacheStats | null>(null);
   const [clearing, setClearing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: ToastTone } | null>(
+    null,
+  );
   const [version, setVersion] = useState<string>("…");
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [found, setFound] = useState<Update | null>(null);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
 
+  const showToast = useCallback((text: string, tone: ToastTone = "ok") => {
+    setToast({ text, tone });
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3400);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const refreshCache = useCallback(() => {
     api
       .getCacheStats()
       .then(setCache)
-      .catch((e) => setError(String(e)));
-  }, []);
+      .catch((e) => showToast(String(e), "err"));
+  }, [showToast]);
 
   useEffect(() => {
     void getVersion().then(setVersion).catch(() => setVersion("unknown"));
@@ -47,21 +60,18 @@ export function SettingsView({
 
   useEffect(() => {
     if (!active) return;
-    setError(null);
     refreshCache();
   }, [active, refreshCache]);
 
   async function onClearCache() {
     if (clearing) return;
     setClearing(true);
-    setMessage(null);
-    setError(null);
     try {
       const s = await api.clearAudioCache();
       setCache(s);
-      setMessage("音频缓存已清除");
+      showToast("音频缓存已清除", "ok");
     } catch (e) {
-      setError(String(e));
+      showToast(String(e), "err");
     } finally {
       setClearing(false);
     }
@@ -70,20 +80,20 @@ export function SettingsView({
   async function onCheckUpdate() {
     if (checking || installing) return;
     setChecking(true);
-    setMessage(null);
-    setError(null);
     setFound(null);
     try {
-      const update = await checkForAppUpdate();
-      setFound(update);
-      onUpdateAvailable?.(update);
-      if (update) {
-        setMessage(`发现新版本 ${update.version}`);
-      } else {
-        setMessage("当前已是最新版本");
-      }
+      const result = await checkForAppUpdate();
+      setFound(result.update);
+      onUpdateAvailable?.(result.update);
+      const tone: ToastTone =
+        result.status === "unavailable"
+          ? "err"
+          : result.status === "available"
+            ? "warn"
+            : "ok";
+      showToast(result.message, tone);
     } catch (e) {
-      setError(String(e).replace(/^Error:\s*/, ""));
+      showToast(String(e).replace(/^Error:\s*/, ""), "err");
     } finally {
       setChecking(false);
     }
@@ -92,11 +102,11 @@ export function SettingsView({
   async function onInstallUpdate() {
     if (!found || installing) return;
     setInstalling(true);
-    setError(null);
     try {
+      showToast("开始下载更新…", "ok");
       await installAppUpdate(found, setProgress);
     } catch (e) {
-      setError(String(e).replace(/^Error:\s*/, ""));
+      showToast(String(e).replace(/^Error:\s*/, ""), "err");
       setInstalling(false);
     }
   }
@@ -109,14 +119,17 @@ export function SettingsView({
 
   return (
     <section className="panel settings-panel">
+      {toast ? (
+        <div className={`app-toast tone-${toast.tone}`} role="status">
+          {toast.text}
+        </div>
+      ) : null}
+
       <header className="panel-head">
         <p className="eyebrow">Settings</p>
         <h1>设置</h1>
         <p>播放偏好、本地缓存与版本更新</p>
       </header>
-
-      {error ? <div className="error-banner">{error}</div> : null}
-      {message ? <div className="settings-toast">{message}</div> : null}
 
       <div className="settings-block">
         <h2>默认音源</h2>

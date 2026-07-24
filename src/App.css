@@ -487,6 +487,52 @@ button {
   font-size: 0.85rem;
 }
 
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--player-h) + 20px);
+  transform: translateX(-50%);
+  z-index: 1200;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(22, 20, 16, 0.94);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
+  animation: appToastIn 0.22s ease both;
+}
+
+.app-toast.tone-ok {
+  border-color: rgba(232, 168, 74, 0.4);
+  color: #f3d39a;
+}
+
+.app-toast.tone-warn {
+  border-color: rgba(232, 168, 74, 0.55);
+  color: var(--accent);
+}
+
+.app-toast.tone-err {
+  border-color: rgba(232, 110, 110, 0.45);
+  color: #f0b0b0;
+}
+
+@keyframes appToastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 .settings-update-actions {
   display: flex;
   flex-wrap: wrap;
