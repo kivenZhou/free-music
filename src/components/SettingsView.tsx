@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import type { Update } from "@tauri-apps/plugin-updater";
 import { api, formatBytes, type CacheStats } from "../api";
 import type { ProviderInfo } from "../types";
+import { checkForAppUpdate, installAppUpdate, type UpdateProgress } from "../updater";
 
 interface Props {
   providers: ProviderInfo[];
@@ -9,6 +12,7 @@ interface Props {
   autoSkip: boolean;
   onAutoSkip: (v: boolean) => void;
   active?: boolean;
+  onUpdateAvailable?: (update: Update | null) => void;
 }
 
 export function SettingsView({
@@ -18,17 +22,27 @@ export function SettingsView({
   autoSkip,
   onAutoSkip,
   active = true,
+  onUpdateAvailable,
 }: Props) {
   const [cache, setCache] = useState<CacheStats | null>(null);
   const [clearing, setClearing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState<string>("…");
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [found, setFound] = useState<Update | null>(null);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
 
   const refreshCache = useCallback(() => {
     api
       .getCacheStats()
       .then(setCache)
       .catch((e) => setError(String(e)));
+  }, []);
+
+  useEffect(() => {
+    void getVersion().then(setVersion).catch(() => setVersion("unknown"));
   }, []);
 
   useEffect(() => {
@@ -53,14 +67,52 @@ export function SettingsView({
     }
   }
 
+  async function onCheckUpdate() {
+    if (checking || installing) return;
+    setChecking(true);
+    setMessage(null);
+    setError(null);
+    setFound(null);
+    try {
+      const update = await checkForAppUpdate();
+      setFound(update);
+      onUpdateAvailable?.(update);
+      if (update) {
+        setMessage(`发现新版本 ${update.version}`);
+      } else {
+        setMessage("当前已是最新版本");
+      }
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function onInstallUpdate() {
+    if (!found || installing) return;
+    setInstalling(true);
+    setError(null);
+    try {
+      await installAppUpdate(found, setProgress);
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ""));
+      setInstalling(false);
+    }
+  }
+
   const chartProviders = providers.filter((p) => p.id !== "youtube");
+  const pct =
+    progress && progress.total && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : null;
 
   return (
     <section className="panel settings-panel">
       <header className="panel-head">
         <p className="eyebrow">Settings</p>
         <h1>设置</h1>
-        <p>播放偏好与本地缓存</p>
+        <p>播放偏好、本地缓存与版本更新</p>
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
@@ -124,6 +176,58 @@ export function SettingsView({
             {clearing ? "清理中…" : "清除缓存"}
           </button>
         </div>
+      </div>
+
+      <div className="settings-block">
+        <h2>软件更新</h2>
+        <p className="settings-desc">
+          当前版本 <strong>v{version}</strong>
+          。有新版本时可在应用内下载并自动替换，完成后重启。
+        </p>
+        <div className="settings-cache-row">
+          <div className="settings-cache-stat">
+            {installing ? (
+              <span>
+                {pct != null
+                  ? `下载中 ${pct}%（${formatBytes(progress!.downloaded)}）`
+                  : progress
+                    ? `下载中 ${formatBytes(progress.downloaded)}…`
+                    : "正在准备更新…"}
+              </span>
+            ) : found ? (
+              <span>
+                可用版本 <strong>v{found.version}</strong>
+              </span>
+            ) : (
+              <span>发布频道：GitHub Releases</span>
+            )}
+          </div>
+          <div className="settings-update-actions">
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={checking || installing}
+              onClick={() => void onCheckUpdate()}
+            >
+              {checking ? "检查中…" : "检查更新"}
+            </button>
+            {found ? (
+              <button
+                type="button"
+                className="play-all-btn"
+                disabled={installing}
+                onClick={() => void onInstallUpdate()}
+              >
+                {installing ? "更新中…" : "立即更新"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {installing && pct != null ? (
+          <div className="update-banner-bar settings-update-bar" aria-hidden>
+            <i style={{ width: `${pct}%` }} />
+          </div>
+        ) : null}
       </div>
 
       <div className="settings-block muted">

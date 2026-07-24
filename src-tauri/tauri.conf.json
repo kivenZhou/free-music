@@ -34,6 +34,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["app", "dmg", "nsis"],
     "icon": [
       "icons/32x32.png",
@@ -51,6 +52,14 @@
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"]
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFEOENERkE5OUUzMzNCNDEKUldSQk96T2VxZCtNclo1a3pVWGMwZld0NTVWMThhSGFnMmxFU0NIKzg0UUl3SjI2MWEvRVQ2ODEK",
+      "endpoints": [
+        "https://github.com/kivenZhou/free-music/releases/latest/download/latest.json"
+      ]
     }
   }
 }

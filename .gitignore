@@ -13,6 +13,9 @@ dist-ssr
 release
 *.local
 
+# Tauri updater signing keys (never commit private key)
+.tauri/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

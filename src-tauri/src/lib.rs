@@ -37,8 +37,13 @@ pub fn run() {
     });
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
         .manage(state)
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             let show_i = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "退出音栈", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;

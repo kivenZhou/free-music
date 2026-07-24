@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Play } from "lucide-react";
 import { api, providerLabel } from "../api";
 import {
   getChartPage,
   getProviderCharts,
   setChartPage,
+  setChartScroll,
   setProviderActive,
   setProviderCharts,
 } from "../chartCache";
@@ -46,6 +53,14 @@ function trackKey(t: Track) {
   return `${t.provider}:${t.id}`;
 }
 
+/** Charts share one pane scroller; always use `.view-pane.on`. */
+function getScrollParent(el: HTMLElement | null): HTMLElement | null {
+  return (
+    (el?.closest(".view-pane") as HTMLElement | null) ??
+    (document.querySelector(".view-pane.on") as HTMLElement | null)
+  );
+}
+
 export function ChartsView({
   providerId,
   favoriteKeys,
@@ -74,6 +89,9 @@ export function ChartsView({
   const hasMoreRef = useRef(false);
   const activeRef = useRef<string | null>(null);
   const chartsRef = useRef<Chart[]>([]);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const pendingScrollRef = useRef<number | null>(null);
+  const providerIdRef = useRef(providerId);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -87,13 +105,47 @@ export function ChartsView({
   useEffect(() => {
     chartsRef.current = charts;
   }, [charts]);
+  useEffect(() => {
+    providerIdRef.current = providerId;
+  }, [providerId]);
+
+  const readScrollTop = useCallback(() => {
+    const scroller = getScrollParent(panelRef.current);
+    return scroller?.scrollTop ?? 0;
+  }, []);
+
+  const persistCurrent = useCallback(() => {
+    const id = providerIdRef.current;
+    const chartId = activeRef.current;
+    if (chartsRef.current.length > 0) {
+      setProviderCharts(id, chartsRef.current, chartId);
+    }
+    if (!chartId || tracksRef.current.length === 0) return;
+    setChartPage(
+      id,
+      chartId,
+      tracksRef.current,
+      hasMoreRef.current,
+      readScrollTop(),
+    );
+  }, [readScrollTop]);
 
   const applyPage = useCallback(
-    (provider: string, chartId: string, list: Track[], more: boolean) => {
-      setTracks(list);
+    (
+      provider: string,
+      chartId: string,
+      list: Track[],
+      more: boolean,
+      scrollTop?: number,
+    ) => {
+      // Clone so React always commits when restoring the same cache array ref.
+      setTracks([...list]);
       setHasMore(more);
-      setChartPage(provider, chartId, list, more);
+      setChartPage(provider, chartId, list, more, scrollTop);
       setProviderActive(provider, chartId);
+      if (scrollTop != null) {
+        pendingScrollRef.current = scrollTop;
+      }
     },
     [],
   );
@@ -104,7 +156,13 @@ export function ChartsView({
         const cached = getChartPage(provider, chartId);
         if (cached && cached.tracks.length > 0) {
           setActive(chartId);
-          applyPage(provider, chartId, cached.tracks, cached.hasMore);
+          applyPage(
+            provider,
+            chartId,
+            cached.tracks,
+            cached.hasMore,
+            cached.scrollTop,
+          );
           setLoading(false);
           setLoadingMore(false);
           setError(null);
@@ -117,11 +175,12 @@ export function ChartsView({
       setLoading(true);
       setLoadingMore(false);
       setError(null);
+      pendingScrollRef.current = 0;
       try {
         const res = await api.chartTracks(chartId, PAGE_SIZE, provider, 0);
         if (inflightKey.current !== key) return;
         const more = res.length >= PAGE_SIZE;
-        applyPage(provider, chartId, res, more);
+        applyPage(provider, chartId, res, more, 0);
       } catch (e) {
         if (inflightKey.current !== key) return;
         setError(String(e).replace(/^Error:\s*/, ""));
@@ -148,14 +207,26 @@ export function ChartsView({
       if (inflightKey.current !== key) return;
       if (res.length === 0) {
         setHasMore(false);
-        setChartPage(provider, chartId, tracksRef.current, false);
+        setChartPage(
+          provider,
+          chartId,
+          tracksRef.current,
+          false,
+          readScrollTop(),
+        );
         return;
       }
       const seen = new Set(tracks.map(trackKey));
       const fresh = res.filter((t) => !seen.has(trackKey(t)));
       if (fresh.length === 0) {
         setHasMore(false);
-        setChartPage(provider, chartId, tracksRef.current, false);
+        setChartPage(
+          provider,
+          chartId,
+          tracksRef.current,
+          false,
+          readScrollTop(),
+        );
         return;
       }
       const merged = (() => {
@@ -166,7 +237,7 @@ export function ChartsView({
         ];
       })();
       const more = res.length >= PAGE_SIZE;
-      applyPage(provider, chartId, merged, more);
+      applyPage(provider, chartId, merged, more, readScrollTop());
     } catch (e) {
       if (inflightKey.current !== key) return;
       setError(String(e).replace(/^Error:\s*/, ""));
@@ -175,25 +246,59 @@ export function ChartsView({
         setLoadingMore(false);
       }
     }
-  }, [active, loading, loadingMore, hasMore, providerId, tracks, applyPage]);
+  }, [
+    active,
+    loading,
+    loadingMore,
+    hasMore,
+    providerId,
+    tracks,
+    applyPage,
+    readScrollTop,
+  ]);
 
-  // Persist current provider snapshot before switching away.
+  // Persist snapshot (tracks + scroll) before leaving a provider.
   useEffect(() => {
     return () => {
-      const id = providerId;
-      if (chartsRef.current.length > 0) {
-        setProviderCharts(id, chartsRef.current, activeRef.current);
-      }
-      if (activeRef.current && tracksRef.current.length > 0) {
-        setChartPage(
-          id,
-          activeRef.current,
-          tracksRef.current,
-          hasMoreRef.current,
-        );
+      persistCurrent();
+    };
+  }, [providerId, persistCurrent]);
+
+  // Keep scrollTop fresh while the user scrolls this pane.
+  useEffect(() => {
+    const scroller = getScrollParent(panelRef.current);
+    if (!scroller) return;
+
+    const onScroll = () => {
+      const chartId = activeRef.current;
+      if (!chartId) return;
+      setChartScroll(providerIdRef.current, chartId, scroller.scrollTop);
+    };
+
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      // Flush latest position when detaching / switching.
+      const chartId = activeRef.current;
+      if (chartId && tracksRef.current.length > 0) {
+        setChartScroll(providerIdRef.current, chartId, scroller.scrollTop);
       }
     };
-  }, [providerId]);
+  }, [providerId, active]);
+
+  // Restore scroll after tracks paint.
+  useLayoutEffect(() => {
+    if (pendingScrollRef.current == null) return;
+    const top = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    const scroller = getScrollParent(panelRef.current);
+    if (!scroller) return;
+    scroller.scrollTop = top;
+    // Second frame: list height may settle after layout.
+    window.requestAnimationFrame(() => {
+      scroller.scrollTop = top;
+    });
+  }, [tracks, providerId, active]);
 
   // Provider bootstrap — restore session cache when possible.
   useEffect(() => {
@@ -218,12 +323,19 @@ export function ChartsView({
         setTracks([]);
         setHasMore(false);
         setLoading(false);
+        pendingScrollRef.current = 0;
         return;
       }
 
       const cachedPage = getChartPage(forProvider, firstId);
       if (cachedPage && cachedPage.tracks.length > 0) {
-        applyPage(forProvider, firstId, cachedPage.tracks, cachedPage.hasMore);
+        applyPage(
+          forProvider,
+          firstId,
+          cachedPage.tracks,
+          cachedPage.hasMore,
+          cachedPage.scrollTop,
+        );
         setLoading(false);
         return;
       }
@@ -231,6 +343,7 @@ export function ChartsView({
       setTracks([]);
       setHasMore(false);
       setLoading(true);
+      pendingScrollRef.current = 0;
       void fetchTracksFor(forProvider, firstId);
       return;
     }
@@ -240,6 +353,7 @@ export function ChartsView({
     setTracks([]);
     setHasMore(false);
     setLoading(true);
+    pendingScrollRef.current = 0;
 
     (async () => {
       try {
@@ -281,9 +395,15 @@ export function ChartsView({
     (chartId: string) => {
       if (chartId === active && !loading) return;
 
-      // Flush current tab into cache before leaving.
+      // Flush current tab (incl. scroll) into cache before leaving.
       if (active && tracksRef.current.length > 0) {
-        setChartPage(providerId, active, tracksRef.current, hasMoreRef.current);
+        setChartPage(
+          providerId,
+          active,
+          tracksRef.current,
+          hasMoreRef.current,
+          readScrollTop(),
+        );
       }
 
       setActive(chartId);
@@ -291,13 +411,20 @@ export function ChartsView({
 
       const cached = getChartPage(providerId, chartId);
       if (cached && cached.tracks.length > 0) {
-        applyPage(providerId, chartId, cached.tracks, cached.hasMore);
+        applyPage(
+          providerId,
+          chartId,
+          cached.tracks,
+          cached.hasMore,
+          cached.scrollTop,
+        );
         setLoading(false);
         setError(null);
         return;
       }
 
       setHasMore(false);
+      pendingScrollRef.current = 0;
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
       }
@@ -306,7 +433,7 @@ export function ChartsView({
         void fetchTracksFor(providerId, chartId);
       }, 180);
     },
-    [active, loading, fetchTracksFor, providerId, applyPage],
+    [active, loading, fetchTracksFor, providerId, applyPage, readScrollTop],
   );
 
   useEffect(() => {
@@ -321,7 +448,7 @@ export function ChartsView({
   const showList = !loading || tracks.length > 0;
 
   return (
-    <section className="panel">
+    <section className="panel" ref={panelRef}>
       <header className="panel-head row">
         <div>
           <p className="eyebrow">Charts · {providerLabel(providerId)}</p>
@@ -348,7 +475,9 @@ export function ChartsView({
             <button
               type="button"
               className="ghost-btn"
-              onClick={() => void fetchTracksFor(providerId, active, { force: true })}
+              onClick={() =>
+                void fetchTracksFor(providerId, active, { force: true })
+              }
               title="忽略缓存，重新拉取"
             >
               {tracks.length === 0 ? "重新加载" : "刷新"}

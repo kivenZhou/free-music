@@ -3,6 +3,7 @@ import type { Chart, Track } from "./types";
 export type ChartPageCache = {
   tracks: Track[];
   hasMore: boolean;
+  scrollTop: number;
   updatedAt: number;
 };
 
@@ -28,12 +29,31 @@ export function setChartPage(
   chartId: string,
   tracks: Track[],
   hasMore: boolean,
+  scrollTop?: number,
 ) {
-  pageCache.set(chartCacheKey(provider, chartId), {
+  const key = chartCacheKey(provider, chartId);
+  const prev = pageCache.get(key);
+  pageCache.set(key, {
     tracks,
     hasMore,
+    scrollTop: scrollTop ?? prev?.scrollTop ?? 0,
     updatedAt: Date.now(),
   });
+}
+
+export function setChartScroll(provider: string, chartId: string, scrollTop: number) {
+  const key = chartCacheKey(provider, chartId);
+  const prev = pageCache.get(key);
+  if (!prev) {
+    pageCache.set(key, {
+      tracks: [],
+      hasMore: false,
+      scrollTop,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+  pageCache.set(key, { ...prev, scrollTop, updatedAt: Date.now() });
 }
 
 export function getProviderCharts(provider: string): ProviderChartsCache | null {

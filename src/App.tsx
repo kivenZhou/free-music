@@ -14,8 +14,11 @@ import { PlaylistsView } from "./components/PlaylistsView";
 import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { TrendingUp, Search, Heart, History, Settings, ListMusic } from "lucide-react";
+import type { Update } from "@tauri-apps/plugin-updater";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
+import { checkForAppUpdate } from "./updater";
 import "./App.css";
 
 const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
@@ -110,6 +113,7 @@ function App() {
   const [autoSkip, setAutoSkip] = useState(
     () => localStorage.getItem("yinzhan-auto-skip") !== "0",
   );
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
 
   const queueReadyRef = useRef(false);
 
@@ -153,6 +157,20 @@ function App() {
     autoSkipRef.current = autoSkip;
     localStorage.setItem("yinzhan-auto-skip", autoSkip ? "1" : "0");
   }, [autoSkip]);
+
+  // Quietly check GitHub Releases a few seconds after launch.
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void checkForAppUpdate().then((update) => {
+        if (!cancelled && update) setPendingUpdate(update);
+      });
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const refreshFavorites = useCallback(async () => {
     const list = await api.listFavorites();
@@ -770,50 +788,58 @@ function App() {
           </div>
         </div>
 
-        <nav>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className={`nav-item ${nav === item.key ? "on" : ""}`}
-                onClick={() => setNav(item.key)}
-              >
-                <Icon size={18} strokeWidth={2} />
-                <span className="nav-label">
-                  <span className="nav-zh">{item.label}</span>
-                  <span className="nav-en">{item.en}</span>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
-
-        {nav === "charts" ? (
-          <div className="source-block">
-            <div className="source-label">
-              <span className="source-label-zh">音源</span>
-              <span className="source-label-en">Source</span>
-            </div>
-            <div className="source-list">
-              {providers.map((p) => (
+        <div className="sidebar-scroll">
+          <nav>
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
                 <button
-                  key={p.id}
+                  key={item.key}
                   type="button"
-                  className={`source-btn ${providerId === p.id ? "on" : ""}`}
-                  onClick={() => setProviderId(p.id)}
+                  className={`nav-item ${nav === item.key ? "on" : ""}`}
+                  onClick={() => setNav(item.key)}
                 >
-                  <span className="source-btn-dot" aria-hidden />
-                  {providerLabel(p.id)}
+                  <Icon size={18} strokeWidth={2} />
+                  <span className="nav-label">
+                    <span className="nav-zh">{item.label}</span>
+                    <span className="nav-en">{item.en}</span>
+                  </span>
                 </button>
-              ))}
+              );
+            })}
+          </nav>
+
+          {nav === "charts" ? (
+            <div className="source-block">
+              <div className="source-label">
+                <span className="source-label-zh">音源</span>
+                <span className="source-label-en">Source</span>
+              </div>
+              <div className="source-list">
+                {providers.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`source-btn ${providerId === p.id ? "on" : ""}`}
+                    onClick={() => setProviderId(p.id)}
+                  >
+                    <span className="source-btn-dot" aria-hidden />
+                    {providerLabel(p.id)}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </aside>
 
       <main className="main">
+        {!mini && pendingUpdate ? (
+          <UpdateBanner
+            update={pendingUpdate}
+            onDismiss={() => setPendingUpdate(null)}
+          />
+        ) : null}
         <div className={`view-pane ${nav === "charts" ? "on" : ""}`}>
           <ChartsView
             providerId={providerId}
@@ -887,6 +913,9 @@ function App() {
             autoSkip={autoSkip}
             onAutoSkip={setAutoSkip}
             active={nav === "settings"}
+            onUpdateAvailable={(u) => {
+              if (u) setPendingUpdate(u);
+            }}
           />
         </div>
       </main>
