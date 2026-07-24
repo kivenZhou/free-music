@@ -43,6 +43,6 @@ export interface ProviderInfo {
   name: string;
 }
 
-export type NavKey = "charts" | "search" | "favorites" | "history";
+export type NavKey = "charts" | "search" | "favorites" | "history" | "settings";
 
 export type RepeatMode = "off" | "all" | "one";

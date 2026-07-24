@@ -25,8 +25,10 @@
   --sidebar-w: 220px;
   --player-h: 76px;
 
-  --font-display: "Outfit", "Noto Sans SC", sans-serif;
-  --font-body: "Noto Sans SC", "Outfit", sans-serif;
+  --font-display: "Outfit", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans SC", sans-serif;
+  --font-body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Outfit", sans-serif;
 
   /* legacy aliases used by components */
   --ink: var(--text);
@@ -338,6 +340,89 @@ button {
   color: var(--text-dim);
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+.settings-panel {
+  max-width: 640px;
+}
+
+.settings-block {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-block h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: var(--font-display);
+}
+
+.settings-block.muted h2 {
+  color: var(--text-soft);
+}
+
+.settings-desc {
+  margin: 6px 0 14px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.settings-cache-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-cache-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-cache-stat strong {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+}
+
+.settings-cache-stat span {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.settings-toast {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: rgba(232, 168, 74, 0.12);
+  color: var(--accent);
+  font-size: 0.85rem;
 }
 
 .panel-actions {
@@ -1491,8 +1576,7 @@ button {
   .brand-tag,
   .source-block,
   .sidebar-foot,
-  .nav-label,
-  .volume-slider {
+  .nav-label {
     display: none;
   }
 
@@ -1527,7 +1611,9 @@ button {
   }
 
   .player {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+    gap: 10px;
+    padding: 0 12px;
   }
 
   .player-controls {
@@ -1535,10 +1621,17 @@ button {
   }
 
   .seek {
-    display: none;
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 6px;
+    font-size: 0.68rem;
   }
 
   .player-aside {
+    display: flex;
+    gap: 2px;
+  }
+
+  .volume-wrap {
     display: none;
   }
 

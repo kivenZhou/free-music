@@ -192,21 +192,37 @@ impl MusicProvider for KugouProvider {
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
         let (remote, size) = self.fetch_play_info(track_id).await?;
-        match self.download_to_cache(track_id, &remote).await {
-            Ok(local) => Ok(PlayUrl {
-                url: remote,
-                local_path: Some(local.to_string_lossy().into_owned()),
-                playability: Playability::Full,
-                quality: Some(format!("{size}")),
-                expires_hint: Some("cached".into()),
-            }),
-            Err(_) => Ok(PlayUrl {
-                url: remote,
-                local_path: None,
-                playability: Playability::Full,
-                quality: Some(format!("{size}")),
-                expires_hint: Some("direct".into()),
-            }),
+        let cached = self.cache_dir.join(format!("kugou_{track_id}.mp3"));
+        if cached.exists() {
+            if let Ok(meta) = std::fs::metadata(&cached) {
+                if meta.len() > 200_000 {
+                    return Ok(PlayUrl {
+                        url: remote,
+                        local_path: Some(cached.to_string_lossy().into_owned()),
+                        playability: Playability::Full,
+                        quality: Some(format!("{size}")),
+                        expires_hint: Some("cached".into()),
+                    });
+                }
+            }
         }
+
+        // Stream immediately; warm disk cache in the background.
+        let client = self.client.clone();
+        let cache_dir = self.cache_dir.clone();
+        let tid = track_id.to_string();
+        let remote_bg = remote.clone();
+        tauri::async_runtime::spawn(async move {
+            let p = KugouProvider { client, cache_dir };
+            let _ = p.download_to_cache(&tid, &remote_bg).await;
+        });
+
+        Ok(PlayUrl {
+            url: remote,
+            local_path: None,
+            playability: Playability::Full,
+            quality: Some(format!("{size}")),
+            expires_hint: Some("stream".into()),
+        })
     }
 }

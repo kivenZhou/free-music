@@ -220,6 +220,45 @@ impl KuwoProvider {
         Ok(path)
     }
 
+    /// Fast stub / HTML check via ranged GET — avoids waiting for a full download.
+    async fn probe_streamable(&self, remote: &str) -> Result<(), ProviderError> {
+        let resp = self
+            .client
+            .get(remote)
+            .header("Range", "bytes=0-4095")
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        if status != 200 && status != 206 {
+            return Err(ProviderError::Msg(format!("探测失败 HTTP {status}")));
+        }
+        let total = resp
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.rsplit('/').next())
+            .and_then(|n| n.parse::<u64>().ok())
+            .or_else(|| {
+                resp.headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|n| n.parse::<u64>().ok())
+            });
+        if let Some(t) = total {
+            if STUB_SIZES.iter().any(|&s| t.abs_diff(s) < 2048) || t < 220_000 {
+                return Err(ProviderError::Msg(
+                    "该曲仅限酷我客户端播放（已拦截提示音）".into(),
+                ));
+            }
+        }
+        let bytes = resp.bytes().await?;
+        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(64)]).to_ascii_lowercase();
+        if head.contains("<html") || head.contains("<!doctype") {
+            return Err(ProviderError::Msg("音源无效".into()));
+        }
+        Ok(())
+    }
+
     async fn search_raw(&self, query: &str, fetch_n: u32) -> Result<Vec<Track>, ProviderError> {
         let url = format!(
             "http://search.kuwo.cn/r.s?all={}&ft=music&itemset=web_2013&client=kt&pn=0&rn={}&rformat=json&encoding=utf8",
@@ -275,13 +314,39 @@ impl MusicProvider for KuwoProvider {
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
         let (remote, _dur, br) = self.resolve_remote(track_id).await?;
-        let local = self.download_to_cache(track_id, &remote).await?;
+        let path = self.cache_dir.join(format!("kuwo_{track_id}.mp3"));
+        if path.exists() {
+            if let Ok(meta) = std::fs::metadata(&path) {
+                let len = meta.len();
+                if len > 300_000 && !STUB_SIZES.iter().any(|&s| len.abs_diff(s) < 2048) {
+                    return Ok(PlayUrl {
+                        url: remote.clone(),
+                        local_path: Some(path.to_string_lossy().into_owned()),
+                        playability: Playability::Full,
+                        quality: Some(format!("{br}")),
+                        expires_hint: Some("cached".into()),
+                    });
+                }
+            }
+        }
+
+        self.probe_streamable(&remote).await?;
+
+        let client = self.client.clone();
+        let cache_dir = self.cache_dir.clone();
+        let tid = track_id.to_string();
+        let remote_bg = remote.clone();
+        tauri::async_runtime::spawn(async move {
+            let p = KuwoProvider { client, cache_dir };
+            let _ = p.download_to_cache(&tid, &remote_bg).await;
+        });
+
         Ok(PlayUrl {
-            url: format!("file://{}", local.to_string_lossy()),
-            local_path: Some(local.to_string_lossy().into_owned()),
+            url: remote,
+            local_path: None,
             playability: Playability::Full,
             quality: Some(format!("{br}")),
-            expires_hint: Some("cached".into()),
+            expires_hint: Some("stream".into()),
         })
     }
 }

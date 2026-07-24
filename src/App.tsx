@@ -10,7 +10,8 @@ import { LyricsPanel, mergeLyrics, type LyricLine } from "./components/LyricsPan
 import { PlayerBar } from "./components/PlayerBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
-import { TrendingUp, Search, Heart, History } from "lucide-react";
+import { SettingsView } from "./components/SettingsView";
+import { TrendingUp, Search, Heart, History, Settings } from "lucide-react";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import "./App.css";
 
@@ -98,9 +99,14 @@ function App() {
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState<string | null>(null);
-  const [mini, setMini] = useState(false);
+  const [mini, setMini] = useState(
+    () => localStorage.getItem("yinzhan-mini") === "1",
+  );
   const [cacheLabel, setCacheLabel] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
+  const [autoSkip, setAutoSkip] = useState(
+    () => localStorage.getItem("yinzhan-auto-skip") !== "0",
+  );
 
   const queueReadyRef = useRef(false);
 
@@ -111,6 +117,7 @@ function App() {
   const repeatRef = useRef<RepeatMode>("off");
   const playGenRef = useRef(0);
   const failSkipRef = useRef(0);
+  const autoSkipRef = useRef(true);
   const normalSizeRef = useRef({ width: 1180, height: 760 });
   const playTrackAtRef = useRef<(tracks: Track[], index: number) => void>(() => undefined);
   const advanceRef = useRef<(dir: 1 | -1, opts?: { fromEnded?: boolean }) => void>(
@@ -139,6 +146,11 @@ function App() {
     repeatRef.current = repeatMode;
   }, [repeatMode]);
 
+  useEffect(() => {
+    autoSkipRef.current = autoSkip;
+    localStorage.setItem("yinzhan-auto-skip", autoSkip ? "1" : "0");
+  }, [autoSkip]);
+
   const refreshFavorites = useCallback(async () => {
     const list = await api.listFavorites();
     setFavoriteKeys(new Set(list.map((i) => favKey(i.track))));
@@ -146,11 +158,28 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // Keep normal-mode floor after allowing smaller mini window in conf.
-    void getCurrentWindow()
-      .setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height))
-      .catch(() => undefined);
+    // Restore mini geometry, or keep normal-mode floor after allowing smaller mini window in conf.
+    const win = getCurrentWindow();
+    if (localStorage.getItem("yinzhan-mini") === "1") {
+      void (async () => {
+        try {
+          await win.setMinSize(new LogicalSize(360, 88));
+          await win.setSize(new LogicalSize(MINI_SIZE.width, MINI_SIZE.height));
+          await win.setAlwaysOnTop(true);
+        } catch {
+          // ignore restore errors on first paint
+        }
+      })();
+    } else {
+      void win
+        .setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height))
+        .catch(() => undefined);
+    }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("yinzhan-mini", mini ? "1" : "0");
+  }, [mini]);
 
   useEffect(() => {
     api.listProviders().then((ps) => {
@@ -270,6 +299,7 @@ function App() {
       audio.pause();
       const resolved = await api.resolvePlayUrl(track);
       if (gen !== playGenRef.current) return;
+      // Prefer disk cache when warm; otherwise stream remote URL immediately.
       const src = resolved.localPath
         ? convertFileSrc(resolved.localPath)
         : resolved.url;
@@ -280,19 +310,32 @@ function App() {
       await audio.play();
       if (gen !== playGenRef.current) return;
       failSkipRef.current = 0;
+      // Refresh cache label occasionally after stream-backed plays
+      if (!resolved.localPath) {
+        window.setTimeout(() => {
+          api
+            .getCacheStats()
+            .then((s) => {
+              if (s.fileCount > 0) {
+                setCacheLabel(`${formatBytes(s.sizeBytes)} · ${s.fileCount} 文件`);
+              }
+            })
+            .catch(() => undefined);
+        }, 4000);
+      }
     } catch (e) {
       if (gen !== playGenRef.current) return;
       setPlaying(false);
       setPlayError(String(e).replace(/^Error:\s*/, ""));
       const canAdvance = index < tracks.length - 1 || repeatRef.current === "all";
-      if (canAdvance && failSkipRef.current < 3) {
+      if (autoSkipRef.current && canAdvance && failSkipRef.current < 3) {
         failSkipRef.current += 1;
         window.setTimeout(() => {
           if (gen === playGenRef.current) {
             advanceRef.current(1);
           }
         }, 600);
-      } else if (failSkipRef.current >= 3) {
+      } else if (autoSkipRef.current && failSkipRef.current >= 3) {
         setPlayError("连续多首无法播放，已暂停");
         failSkipRef.current = 0;
       }
@@ -361,6 +404,10 @@ function App() {
     const onErr = () => {
       const gen = playGenRef.current;
       setPlaying(false);
+      if (!autoSkipRef.current) {
+        setPlayError("播放失败");
+        return;
+      }
       setPlayError("播放失败，尝试下一首…");
       if (failSkipRef.current >= 3) {
         setPlayError("连续多首无法播放，已暂停");
@@ -569,6 +616,7 @@ function App() {
         setQueueOpen(false);
         setLyricsOpen(false);
         setMini(true);
+        localStorage.setItem("yinzhan-mini", "1");
       } else {
         await win.setAlwaysOnTop(false);
         await win.setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height));
@@ -576,6 +624,7 @@ function App() {
           new LogicalSize(normalSizeRef.current.width, normalSizeRef.current.height),
         );
         setMini(false);
+        localStorage.setItem("yinzhan-mini", "0");
       }
     } catch (e) {
       setPlayError(String(e).replace(/^Error:\s*/, ""));
@@ -736,6 +785,7 @@ function App() {
         { key: "search" as const, label: "搜索", en: "Search", icon: Search },
         { key: "favorites" as const, label: "收藏", en: "Saved", icon: Heart },
         { key: "history" as const, label: "历史", en: "History", icon: History },
+        { key: "settings" as const, label: "设置", en: "Prefs", icon: Settings },
       ] as const,
     [],
   );
@@ -855,6 +905,16 @@ function App() {
         </div>
         <div className={`view-pane ${nav === "history" ? "on" : ""}`}>
           <HistoryView onSearch={goSearch} active={nav === "history"} />
+        </div>
+        <div className={`view-pane ${nav === "settings" ? "on" : ""}`}>
+          <SettingsView
+            providers={providers}
+            providerId={providerId}
+            onProviderId={setProviderId}
+            autoSkip={autoSkip}
+            onAutoSkip={setAutoSkip}
+            active={nav === "settings"}
+          />
         </div>
       </main>
         </>

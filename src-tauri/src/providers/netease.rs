@@ -259,34 +259,42 @@ impl NeteaseProvider {
     }
 
     async fn resolve_play_candidates(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
-        // 1) Official API
-        if let Some((remote, br)) = self.fetch_official_url(track_id).await? {
-            match self.download_to_cache(track_id, &remote).await {
-                Ok(local) => {
+        let cached = self.cache_dir.join(format!("{track_id}.mp3"));
+        if cached.exists() {
+            if let Ok(meta) = std::fs::metadata(&cached) {
+                if meta.len() > 64 * 1024 {
+                    // Still try to expose a remote URL for reference, but play from cache.
+                    let remote = self
+                        .fetch_official_url(track_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|(u, _)| u)
+                        .unwrap_or_default();
                     return Ok(PlayUrl {
                         url: remote,
-                        local_path: Some(local.to_string_lossy().into_owned()),
+                        local_path: Some(cached.to_string_lossy().into_owned()),
                         playability: Playability::Full,
-                        quality: Some(format!("{br}")),
+                        quality: Some("cache".into()),
                         expires_hint: Some("cached".into()),
                     });
-                }
-                Err(_) => {
-                    // Fall back to direct HTTPS stream if download failed
-                    if self.is_audio_url(&remote).await {
-                        return Ok(PlayUrl {
-                            url: remote,
-                            local_path: None,
-                            playability: Playability::Full,
-                            quality: Some(format!("{br}")),
-                            expires_hint: Some("direct".into()),
-                        });
-                    }
                 }
             }
         }
 
-        // 2) Outer media URL (only if it really redirects to audio)
+        // 1) Official API — stream first, warm cache in background
+        if let Some((remote, br)) = self.fetch_official_url(track_id).await? {
+            self.spawn_cache(track_id, &remote);
+            return Ok(PlayUrl {
+                url: remote,
+                local_path: None,
+                playability: Playability::Full,
+                quality: Some(format!("{br}")),
+                expires_hint: Some("stream".into()),
+            });
+        }
+
+        // 2) Outer media URL
         let outer = format!(
             "https://music.163.com/song/media/outer/url?id={}.mp3",
             track_id
@@ -304,15 +312,14 @@ impl NeteaseProvider {
                     || ctype.contains("mpeg")
                     || ctype.contains("octet-stream");
                 if looks_audio || self.is_audio_url(&final_url).await {
-                    if let Ok(local) = self.download_to_cache(track_id, &final_url).await {
-                        return Ok(PlayUrl {
-                            url: final_url,
-                            local_path: Some(local.to_string_lossy().into_owned()),
-                            playability: Playability::Full,
-                            quality: Some("outer".into()),
-                            expires_hint: Some("cached".into()),
-                        });
-                    }
+                    self.spawn_cache(track_id, &final_url);
+                    return Ok(PlayUrl {
+                        url: final_url,
+                        local_path: None,
+                        playability: Playability::Full,
+                        quality: Some("outer".into()),
+                        expires_hint: Some("stream".into()),
+                    });
                 }
             }
         }
@@ -320,6 +327,20 @@ impl NeteaseProvider {
         Err(ProviderError::Msg(
             "该曲在网易云无免费完整音源".into(),
         ))
+    }
+
+    fn spawn_cache(&self, track_id: &str, remote: &str) {
+        let client = self.client.clone();
+        let cache_dir = self.cache_dir.clone();
+        let track_id = track_id.to_string();
+        let remote = remote.to_string();
+        tauri::async_runtime::spawn(async move {
+            let provider = NeteaseProvider {
+                client,
+                cache_dir,
+            };
+            let _ = provider.download_to_cache(&track_id, &remote).await;
+        });
     }
 }
 

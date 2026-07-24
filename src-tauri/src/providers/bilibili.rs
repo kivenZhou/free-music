@@ -382,11 +382,27 @@ impl MusicProvider for BilibiliProvider {
     }
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+        let safe_id = track_id.replace("?cid=", "_");
+        let cached = self.cache_dir.join(format!("{}.m4a", safe_id));
+        if cached.exists() {
+            if let Ok(meta) = std::fs::metadata(&cached) {
+                if meta.len() > 100_000 {
+                    return Ok(PlayUrl {
+                        url: String::new(),
+                        local_path: Some(cached.to_string_lossy().into_owned()),
+                        playability: Playability::Full,
+                        quality: Some("HQ".into()),
+                        expires_hint: Some("cached".into()),
+                    });
+                }
+            }
+        }
+        // B站音频 CDN 通常需要 Referer，浏览器 <audio> 直链易失败，仍先落盘再播。
         let remote = self.get_play_url(track_id).await?;
         let local = self.download_to_cache(track_id, &remote).await?;
 
         Ok(PlayUrl {
-            url: format!("file://{}", local.to_string_lossy()),
+            url: remote,
             local_path: Some(local.to_string_lossy().into_owned()),
             playability: Playability::Full,
             quality: Some("HQ".into()),
