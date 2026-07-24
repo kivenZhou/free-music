@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import { api, providerLabel } from "../api";
+import {
+  getChartPage,
+  getProviderCharts,
+  setChartPage,
+  setProviderActive,
+  setProviderCharts,
+} from "../chartCache";
 import type { Chart, Track } from "../types";
 import { SongList } from "./SongList";
 
@@ -63,29 +70,69 @@ export function ChartsView({
   /** Only the latest in-flight request may commit UI state. */
   const inflightKey = useRef<string | null>(null);
   const providerEpoch = useRef(0);
+  const tracksRef = useRef<Track[]>([]);
+  const hasMoreRef = useRef(false);
+  const activeRef = useRef<string | null>(null);
+  const chartsRef = useRef<Chart[]>([]);
 
-  const fetchTracksFor = useCallback(async (provider: string, chartId: string) => {
-    const key = reqKey(provider, chartId);
-    inflightKey.current = key;
-    setLoading(true);
-    setLoadingMore(false);
-    setHasMore(false);
-    setError(null);
-    try {
-      const res = await api.chartTracks(chartId, PAGE_SIZE, provider, 0);
-      if (inflightKey.current !== key) return;
-      setTracks(res);
-      setHasMore(res.length >= PAGE_SIZE);
-    } catch (e) {
-      if (inflightKey.current !== key) return;
-      // Keep previous list on transient Bilibili failures (rate-limit / decode errors)
-      setError(String(e).replace(/^Error:\s*/, ""));
-    } finally {
-      if (inflightKey.current === key) {
-        setLoading(false);
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  useEffect(() => {
+    chartsRef.current = charts;
+  }, [charts]);
+
+  const applyPage = useCallback(
+    (provider: string, chartId: string, list: Track[], more: boolean) => {
+      setTracks(list);
+      setHasMore(more);
+      setChartPage(provider, chartId, list, more);
+      setProviderActive(provider, chartId);
+    },
+    [],
+  );
+
+  const fetchTracksFor = useCallback(
+    async (provider: string, chartId: string, opts?: { force?: boolean }) => {
+      if (!opts?.force) {
+        const cached = getChartPage(provider, chartId);
+        if (cached && cached.tracks.length > 0) {
+          setActive(chartId);
+          applyPage(provider, chartId, cached.tracks, cached.hasMore);
+          setLoading(false);
+          setLoadingMore(false);
+          setError(null);
+          return;
+        }
       }
-    }
-  }, []);
+
+      const key = reqKey(provider, chartId);
+      inflightKey.current = key;
+      setLoading(true);
+      setLoadingMore(false);
+      setError(null);
+      try {
+        const res = await api.chartTracks(chartId, PAGE_SIZE, provider, 0);
+        if (inflightKey.current !== key) return;
+        const more = res.length >= PAGE_SIZE;
+        applyPage(provider, chartId, res, more);
+      } catch (e) {
+        if (inflightKey.current !== key) return;
+        setError(String(e).replace(/^Error:\s*/, ""));
+      } finally {
+        if (inflightKey.current === key) {
+          setLoading(false);
+        }
+      }
+    },
+    [applyPage],
+  );
 
   const loadMore = useCallback(async () => {
     if (!active || loading || loadingMore || !hasMore) return;
@@ -101,19 +148,25 @@ export function ChartsView({
       if (inflightKey.current !== key) return;
       if (res.length === 0) {
         setHasMore(false);
+        setChartPage(provider, chartId, tracksRef.current, false);
         return;
       }
       const seen = new Set(tracks.map(trackKey));
       const fresh = res.filter((t) => !seen.has(trackKey(t)));
       if (fresh.length === 0) {
         setHasMore(false);
+        setChartPage(provider, chartId, tracksRef.current, false);
         return;
       }
-      setTracks((prev) => {
-        const keys = new Set(prev.map(trackKey));
-        return [...prev, ...fresh.filter((t) => !keys.has(trackKey(t)))];
-      });
-      setHasMore(res.length >= PAGE_SIZE);
+      const merged = (() => {
+        const keys = new Set(tracksRef.current.map(trackKey));
+        return [
+          ...tracksRef.current,
+          ...fresh.filter((t) => !keys.has(trackKey(t))),
+        ];
+      })();
+      const more = res.length >= PAGE_SIZE;
+      applyPage(provider, chartId, merged, more);
     } catch (e) {
       if (inflightKey.current !== key) return;
       setError(String(e).replace(/^Error:\s*/, ""));
@@ -122,21 +175,71 @@ export function ChartsView({
         setLoadingMore(false);
       }
     }
-  }, [active, loading, loadingMore, hasMore, providerId, tracks]);
+  }, [active, loading, loadingMore, hasMore, providerId, tracks, applyPage]);
 
-  // Remount-safe provider bootstrap
+  // Persist current provider snapshot before switching away.
+  useEffect(() => {
+    return () => {
+      const id = providerId;
+      if (chartsRef.current.length > 0) {
+        setProviderCharts(id, chartsRef.current, activeRef.current);
+      }
+      if (activeRef.current && tracksRef.current.length > 0) {
+        setChartPage(
+          id,
+          activeRef.current,
+          tracksRef.current,
+          hasMoreRef.current,
+        );
+      }
+    };
+  }, [providerId]);
+
+  // Provider bootstrap — restore session cache when possible.
   useEffect(() => {
     const epoch = ++providerEpoch.current;
     const forProvider = providerId;
+    inflightKey.current = null;
+    setError(null);
+    setLoadingMore(false);
+
+    const cachedProvider = getProviderCharts(forProvider);
+    if (cachedProvider && cachedProvider.charts.length > 0) {
+      const firstId =
+        cachedProvider.activeId &&
+        cachedProvider.charts.some((c) => c.id === cachedProvider.activeId)
+          ? cachedProvider.activeId
+          : (cachedProvider.charts[0]?.id ?? null);
+
+      setCharts(cachedProvider.charts);
+      setActive(firstId);
+
+      if (!firstId) {
+        setTracks([]);
+        setHasMore(false);
+        setLoading(false);
+        return;
+      }
+
+      const cachedPage = getChartPage(forProvider, firstId);
+      if (cachedPage && cachedPage.tracks.length > 0) {
+        applyPage(forProvider, firstId, cachedPage.tracks, cachedPage.hasMore);
+        setLoading(false);
+        return;
+      }
+
+      setTracks([]);
+      setHasMore(false);
+      setLoading(true);
+      void fetchTracksFor(forProvider, firstId);
+      return;
+    }
 
     setCharts([]);
     setActive(null);
     setTracks([]);
     setHasMore(false);
-    setError(null);
     setLoading(true);
-    setLoadingMore(false);
-    inflightKey.current = null;
 
     (async () => {
       try {
@@ -146,6 +249,7 @@ export function ChartsView({
         setCharts(list);
         const firstId = list[0]?.id ?? null;
         setActive(firstId);
+        setProviderCharts(forProvider, list, firstId);
 
         if (!firstId) {
           setTracks([]);
@@ -169,14 +273,30 @@ export function ChartsView({
       providerEpoch.current += 1;
       inflightKey.current = null;
     };
-  }, [providerId, fetchTracksFor]);
+  }, [providerId, fetchTracksFor, applyPage]);
 
   const debounceRef = useRef<number | null>(null);
 
   const selectChart = useCallback(
     (chartId: string) => {
       if (chartId === active && !loading) return;
+
+      // Flush current tab into cache before leaving.
+      if (active && tracksRef.current.length > 0) {
+        setChartPage(providerId, active, tracksRef.current, hasMoreRef.current);
+      }
+
       setActive(chartId);
+      setProviderActive(providerId, chartId);
+
+      const cached = getChartPage(providerId, chartId);
+      if (cached && cached.tracks.length > 0) {
+        applyPage(providerId, chartId, cached.tracks, cached.hasMore);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+
       setHasMore(false);
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
@@ -186,7 +306,7 @@ export function ChartsView({
         void fetchTracksFor(providerId, chartId);
       }, 180);
     },
-    [active, loading, fetchTracksFor, providerId],
+    [active, loading, fetchTracksFor, providerId, applyPage],
   );
 
   useEffect(() => {
@@ -224,13 +344,14 @@ export function ChartsView({
               全部播放
             </button>
           ) : null}
-          {!loading && tracks.length === 0 && active ? (
+          {!loading && active ? (
             <button
               type="button"
               className="ghost-btn"
-              onClick={() => void fetchTracksFor(providerId, active)}
+              onClick={() => void fetchTracksFor(providerId, active, { force: true })}
+              title="忽略缓存，重新拉取"
             >
-              重新加载
+              {tracks.length === 0 ? "重新加载" : "刷新"}
             </button>
           ) : null}
         </div>
