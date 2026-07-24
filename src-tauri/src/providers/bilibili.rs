@@ -19,6 +19,11 @@ pub struct BilibiliProvider {
 const CHARTS: &[(&str, &str, &str, &str)] = &[
     ("bili_hot", "热门金曲", "bilibili", "B站最热流行音乐视频"),
     ("bili_new", "最新音乐", "bilibili", "B站最新上传音乐"),
+    ("bili_cantonese", "粤语歌", "hk", "粤语翻唱与金曲"),
+    ("bili_80s", "80年代怀旧", "cn", "八十年代经典"),
+    ("bili_90s", "90年代怀旧", "cn", "九十年代经典"),
+    ("bili_kr", "韩语歌", "kr", "韩语翻唱与流行"),
+    ("bili_jp", "日语歌", "jp", "日语翻唱与流行"),
     ("bili_cover", "翻唱大赏", "bilibili", "高质量民间翻唱"),
     ("bili_acg", "二次元", "bilibili", "ACG神曲全收录"),
     ("bili_elec", "抖腿电音", "bilibili", "超燃电音与鬼畜"),
@@ -553,6 +558,11 @@ impl MusicProvider for BilibiliProvider {
             "bili_acg" => "二次元 音乐",
             "bili_elec" => "抖腿 电音",
             "bili_hot" => "热门 华语 音乐",
+            "bili_cantonese" => "粤语歌",
+            "bili_80s" => "80年代 经典老歌",
+            "bili_90s" => "90年代 经典金曲",
+            "bili_kr" => "韩语歌",
+            "bili_jp" => "日语歌",
             _ => "华语流行 音乐",
         };
         // Expand 分P so list duration matches the cid we actually play.

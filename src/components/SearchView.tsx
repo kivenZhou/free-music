@@ -106,7 +106,7 @@ export function SearchView({
     }
   }
 
-  const searchableProviders = providers.filter((p) => p.id !== "youtube");
+  const searchableProviders = providers;
 
   return (
     <section className="panel">
@@ -116,7 +116,7 @@ export function SearchView({
           <h1>搜索</h1>
           <p>
             {providerFilter === "all"
-              ? "并行聚合 B站 / 网易云 / 酷狗 / 酷我 · 仅免费完整曲"
+              ? "并行聚合多音源 · 仅免费完整曲"
               : `仅搜 ${providerLabel(providerFilter)} · 仅免费完整曲`}
           </p>
         </div>

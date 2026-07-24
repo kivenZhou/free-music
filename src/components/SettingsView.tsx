@@ -111,7 +111,7 @@ export function SettingsView({
     }
   }
 
-  const chartProviders = providers.filter((p) => p.id !== "youtube");
+  const chartProviders = providers;
   const pct =
     progress && progress.total && progress.total > 0
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))

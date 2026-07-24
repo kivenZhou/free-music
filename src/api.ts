@@ -103,8 +103,8 @@ export function providerLabel(id: string): string {
       return "酷狗";
     case "bilibili":
       return "B站";
-    case "youtube":
-      return "YouTube";
+    case "audius":
+      return "Audius";
     default:
       return id;
   }
