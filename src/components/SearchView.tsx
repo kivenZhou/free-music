@@ -64,11 +64,9 @@ export function SearchView({
   return (
     <section className="panel">
       <header className="panel-head">
-        <div>
-          <p className="eyebrow">Search</p>
-          <h1>搜索</h1>
-          <p>聚合酷我 + 网易云 · 仅返回免费完整曲</p>
-        </div>
+        <p className="eyebrow">Search</p>
+        <h1>搜索</h1>
+        <p>聚合多音源 · 仅返回免费完整曲</p>
       </header>
 
       <form className="search-form" onSubmit={onSubmit}>
@@ -102,13 +100,16 @@ export function SearchView({
       ) : null}
 
       {error ? <div className="error-banner">{error}</div> : null}
-      <SongList
-        tracks={tracks}
-        currentKey={currentKey}
-        favoriteKeys={favoriteKeys}
-        onPlay={onPlay}
-        onToggleFavorite={onToggleFavorite}
-      />
+      {loading ? <div className="empty">正在筛选可免费完整播放的歌曲…</div> : null}
+      {!loading ? (
+        <SongList
+          tracks={tracks}
+          currentKey={currentKey}
+          favoriteKeys={favoriteKeys}
+          onPlay={onPlay}
+          onToggleFavorite={onToggleFavorite}
+        />
+      ) : null}
     </section>
   );
 }

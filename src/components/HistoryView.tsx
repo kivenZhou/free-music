@@ -30,9 +30,11 @@ export function HistoryView({ onSearch }: Props) {
           <h1>搜索历史</h1>
           <p>仅存本机 · 最多 50 条</p>
         </div>
-        <button type="button" className="ghost-btn" onClick={() => void clearAll()}>
-          清空
-        </button>
+        {items.length > 0 ? (
+          <button type="button" className="ghost-btn" onClick={() => void clearAll()}>
+            清空
+          </button>
+        ) : null}
       </header>
       {error ? <div className="error-banner">{error}</div> : null}
       {items.length === 0 ? (

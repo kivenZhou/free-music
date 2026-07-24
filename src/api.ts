@@ -50,6 +50,10 @@ export function providerLabel(id: string): string {
       return "网易云";
     case "kugou":
       return "酷狗";
+    case "bilibili":
+      return "B站";
+    case "youtube":
+      return "YouTube";
     default:
       return id;
   }

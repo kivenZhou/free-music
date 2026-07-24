@@ -23,6 +23,26 @@ impl MusicProvider for YoutubeProvider {
     fn name(&self) -> &'static str { "YouTube 音乐" }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
+        // Handle direct URLs
+        if query.contains("youtube.com") || query.contains("youtu.be") {
+            if let Ok(video) = rusty_ytdl::Video::new(query) {
+                if let Ok(info) = video.get_info().await {
+                    let d = info.video_details;
+                    let duration_ms: u64 = d.length_seconds.parse::<u64>().unwrap_or(0) * 1000;
+                    return Ok(vec![Track {
+                        id: d.video_id,
+                        provider: self.id().to_string(),
+                        title: d.title,
+                        artist: d.author.map(|a| a.name).unwrap_or_default(),
+                        album: None,
+                        cover_url: d.thumbnails.first().map(|t| t.url.clone()),
+                        duration_ms: Some(duration_ms),
+                        playability: Playability::Full,
+                    }]);
+                }
+            }
+        }
+
         let options = rusty_ytdl::search::SearchOptions {
             limit: limit as u64,
             search_type: rusty_ytdl::search::SearchType::Video,
@@ -68,14 +88,18 @@ impl MusicProvider for YoutubeProvider {
     }
 
     async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+        // Use VideoAudio to get a progressive MP4 (itag=18).
+        // DASH audio-only streams (like itag=140) break native HTML5 seeking in the <audio> tag.
+        // Progressive streams allow the browser to natively fetch the moov atom and handle Range requests perfectly.
         let video_options = VideoOptions {
-            quality: VideoQuality::HighestAudio,
-            filter: VideoSearchOptions::Audio,
+            quality: VideoQuality::Lowest, // Lowest video quality is fine since we only play audio
+            filter: VideoSearchOptions::VideoAudio,
             ..Default::default()
         };
         
         let video = Video::new_with_options(track_id, video_options.clone()).map_err(|e| ProviderError::Msg(e.to_string()))?;
         let info = video.get_info().await.map_err(|e| ProviderError::Msg(e.to_string()))?;
+        
         let format = rusty_ytdl::choose_format(&info.formats, &video_options)
             .map_err(|e| ProviderError::Msg(e.to_string()))?;
             
@@ -83,7 +107,7 @@ impl MusicProvider for YoutubeProvider {
             url: format.url.clone(),
             local_path: None,
             playability: Playability::Full,
-            quality: Some("HighestAudio".into()),
+            quality: Some("Progressive".into()),
             expires_hint: None,
         })
     }

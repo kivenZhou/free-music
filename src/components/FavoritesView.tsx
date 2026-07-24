@@ -31,11 +31,9 @@ export function FavoritesView({
   return (
     <section className="panel">
       <header className="panel-head">
-        <div>
-          <p className="eyebrow">Library</p>
-          <h1>收藏</h1>
-          <p>本地保存 · {items.length} 首</p>
-        </div>
+        <p className="eyebrow">Library</p>
+        <h1>收藏</h1>
+        <p>本地保存 · {items.length} 首</p>
       </header>
       {error ? <div className="error-banner">{error}</div> : null}
       <SongList

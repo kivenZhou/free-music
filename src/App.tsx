@@ -190,10 +190,15 @@ function App() {
 
   const onSeek = useCallback((ratio: number) => {
     const audio = audioRef.current;
-    if (!audio || !Number.isFinite(audio.duration)) return;
-    audio.currentTime = audio.duration * ratio;
+    if (!audio) return;
+    
+    // Prioritize backend-provided exact duration over browser's streaming estimate
+    const effectiveDur = current?.durationMs ? current.durationMs / 1000 : audio.duration;
+    if (!Number.isFinite(effectiveDur)) return;
+    
+    audio.currentTime = effectiveDur * ratio;
     setProgress(audio.currentTime);
-  }, []);
+  }, [current]);
 
   const toggleFavorite = useCallback(
     async (track: Track) => {
@@ -229,7 +234,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-name">音栈</div>
-          <div className="brand-tag">YINZHAN / FREE STREAM</div>
+          <div className="brand-tag">Yinzhan · Free Stream</div>
         </div>
 
         <nav>
@@ -242,32 +247,38 @@ function App() {
                 className={`nav-item ${nav === item.key ? "on" : ""}`}
                 onClick={() => setNav(item.key)}
               >
-                <Icon size={20} style={{ opacity: 0.8 }} />
-                <span className="nav-en">{item.en}</span>
-                <span className="nav-zh">{item.label}</span>
+                <Icon size={18} strokeWidth={2} />
+                <span className="nav-label">
+                  <span className="nav-zh">{item.label}</span>
+                  <span className="nav-en">{item.en}</span>
+                </span>
               </button>
             );
           })}
         </nav>
 
-        <div className="source-block">
-          <div className="source-label">榜单音源</div>
-          <div className="source-list">
-            {providers.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`source-btn ${providerId === p.id ? "on" : ""}`}
-                onClick={() => setProviderId(p.id)}
-              >
-                {p.name}
-              </button>
-            ))}
+        {nav === "charts" ? (
+          <div className="source-block">
+            <div className="source-label">音源</div>
+            <div className="source-list">
+              {providers.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`source-btn ${providerId === p.id ? "on" : ""}`}
+                  onClick={() => setProviderId(p.id)}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="source-block" aria-hidden />
+        )}
 
         <div className="sidebar-foot">
-          仅免费完整曲目 · 播完自动下一首
+          仅免费完整曲目
           {queue.length > 0 ? (
             <>
               <br />
@@ -314,7 +325,7 @@ function App() {
         loading={loadingPlay}
         error={playError}
         progress={progress}
-        duration={duration}
+        duration={current?.durationMs ? current.durationMs / 1000 : duration}
         hasPrev={hasPrev}
         hasNext={hasNext}
         onToggle={togglePlay}

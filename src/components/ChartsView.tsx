@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, providerLabel } from "../api";
 import type { Chart, Track } from "../types";
 import { SongList } from "./SongList";
 
@@ -34,6 +34,7 @@ export function ChartsView({
     setCharts([]);
     setTracks([]);
     setActive(null);
+    setError(null);
     api
       .listCharts(providerId)
       .then((list) => {
@@ -47,23 +48,37 @@ export function ChartsView({
     if (!active) return;
     setLoading(true);
     setError(null);
+    let ignore = false;
     api
       .chartTracks(active, 40, providerId)
-      .then(setTracks)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (!ignore) setTracks(res);
+      })
+      .catch((e) => {
+        if (!ignore) setError(String(e));
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [active, providerId]);
 
   const current = charts.find((c) => c.id === active);
 
   return (
     <section className="panel">
-      <header className="panel-head">
+      <header className="panel-head row">
         <div>
-          <p className="eyebrow">Charts</p>
+          <p className="eyebrow">Charts · {providerLabel(providerId)}</p>
           <h1>榜单</h1>
-          <p>酷我热榜多为客户端专享，已改为免费可播精选</p>
+          {current ? <p className="panel-desc">{current.description}</p> : null}
         </div>
+        {!loading && tracks.length > 0 ? (
+          <div className="panel-head-meta">{tracks.length} 首可播</div>
+        ) : null}
       </header>
 
       <div className="chart-tabs">
@@ -80,9 +95,8 @@ export function ChartsView({
         ))}
       </div>
 
-      {current ? <p className="panel-desc">{current.description}</p> : null}
       {error ? <div className="error-banner">{error}</div> : null}
-      {loading ? <div className="empty">正在筛选可免费完整播放的歌曲…</div> : null}
+      {loading ? <div className="empty">正在加载可免费完整播放的歌曲…</div> : null}
       {!loading ? (
         <SongList
           tracks={tracks}
@@ -90,6 +104,7 @@ export function ChartsView({
           favoriteKeys={favoriteKeys}
           onPlay={onPlay}
           onToggleFavorite={onToggleFavorite}
+          hideProvider
         />
       ) : null}
     </section>

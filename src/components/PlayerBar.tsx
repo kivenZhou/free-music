@@ -1,6 +1,7 @@
+import { useState } from "react";
 import type { Track } from "../types";
 import { providerLabel } from "../api";
-import { Play, Pause, SkipBack, SkipForward, Loader2 } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Loader2, Music2 } from "lucide-react";
 
 interface Props {
   track: Track | null;
@@ -25,6 +26,25 @@ function fmt(sec: number) {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
+function PlayerCover({ url }: { url?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (!url || broken) {
+    return (
+      <div className="player-cover placeholder">
+        <Music2 size={18} strokeWidth={1.5} />
+      </div>
+    );
+  }
+  return (
+    <img
+      className="player-cover"
+      src={url}
+      alt=""
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
 export function PlayerBar({
   track,
   playing,
@@ -44,15 +64,13 @@ export function PlayerBar({
   return (
     <footer className="player">
       <div className="player-track">
-        {track?.coverUrl ? (
-          <img className="player-cover" src={track.coverUrl} alt="" />
-        ) : (
-          <div className="player-cover placeholder" />
-        )}
+        <PlayerCover url={track?.coverUrl} />
         <div className="player-meta">
           <div className="player-title">{track?.title ?? "尚未播放"}</div>
           <div className="player-artist">
-            {track ? `${track.artist} · ${providerLabel(track.provider)}` : "选一首免费完整曲开始"}
+            {track
+              ? `${track.artist} · ${providerLabel(track.provider)}`
+              : "选一首免费完整曲开始"}
           </div>
         </div>
       </div>
@@ -66,20 +84,21 @@ export function PlayerBar({
             onClick={onPrev}
             title="上一首"
           >
-            <SkipBack size={20} />
+            <SkipBack size={18} />
           </button>
           <button
             className="play-btn"
             type="button"
             disabled={!track || loading}
             onClick={onToggle}
+            title={playing ? "暂停" : "播放"}
           >
             {loading ? (
-              <Loader2 className="animate-spin" size={24} />
+              <Loader2 className="animate-spin" size={20} />
             ) : playing ? (
-              <Pause size={24} fill="currentColor" />
+              <Pause size={20} fill="currentColor" />
             ) : (
-              <Play size={24} fill="currentColor" style={{ marginLeft: "4px" }} />
+              <Play size={20} fill="currentColor" style={{ marginLeft: "2px" }} />
             )}
           </button>
           <button
@@ -89,7 +108,7 @@ export function PlayerBar({
             onClick={onNext}
             title="下一首"
           >
-            <SkipForward size={20} />
+            <SkipForward size={18} />
           </button>
         </div>
         <div className="seek">
