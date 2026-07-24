@@ -30,10 +30,12 @@
 
 从本仓库 [Releases](https://github.com/kivenZhou/free-music/releases) 下载适合你系统的安装包。
 
+当前最新：[`v0.1.0`](https://github.com/kivenZhou/free-music/releases/tag/v0.1.0)
+
 | 平台 | 推荐文件 |
 |------|----------|
-| macOS（Intel / Apple Silicon） | `音栈_*_universal.dmg` 或 `.zip` |
-| Windows | `.exe`（NSIS）或 `.msi` |
+| macOS（Intel / Apple Silicon） | `YinZhan_*_macos_universal.dmg` 或 `.zip` |
+| Windows | `.exe`（NSIS）或 `.msi`（由 Actions 构建后上传） |
 
 ### macOS
 
