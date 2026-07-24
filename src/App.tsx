@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, providerLabel } from "./api";
+import { BrandMark } from "./components/BrandMark";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
@@ -762,8 +763,11 @@ function App() {
         <>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-name">音栈</div>
-          <div className="brand-tag">Yinzhan · Free Stream</div>
+          <BrandMark className="brand-mark" size={42} />
+          <div className="brand-text">
+            <div className="brand-name">音栈</div>
+            <div className="brand-tag">Yinzhan · Free Stream</div>
+          </div>
         </div>
 
         <nav>
@@ -788,7 +792,10 @@ function App() {
 
         {nav === "charts" ? (
           <div className="source-block">
-            <div className="source-label">音源</div>
+            <div className="source-label">
+              <span className="source-label-zh">音源</span>
+              <span className="source-label-en">Source</span>
+            </div>
             <div className="source-list">
               {providers.map((p) => (
                 <button
@@ -797,16 +804,13 @@ function App() {
                   className={`source-btn ${providerId === p.id ? "on" : ""}`}
                   onClick={() => setProviderId(p.id)}
                 >
+                  <span className="source-btn-dot" aria-hidden />
                   {providerLabel(p.id)}
                 </button>
               ))}
             </div>
           </div>
-        ) : (
-          <div className="source-block" aria-hidden />
-        )}
-
-        <div className="sidebar-foot">仅免费完整曲目</div>
+        ) : null}
       </aside>
 
       <main className="main">

@@ -115,24 +115,37 @@ button {
 }
 
 .brand {
-  padding: 0 10px 2px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 6px 2px;
+}
+
+.brand-mark {
+  flex-shrink: 0;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.brand-text {
+  min-width: 0;
 }
 
 .brand-name {
   font-family: var(--font-display);
   font-weight: 800;
-  font-size: 1.75rem;
+  font-size: 1.55rem;
   letter-spacing: 0.04em;
   line-height: 1;
   color: var(--text);
 }
 
 .brand-tag {
-  margin-top: 8px;
+  margin-top: 6px;
   font-family: var(--font-display);
-  font-size: 0.65rem;
+  font-size: 0.58rem;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--accent);
   opacity: 0.9;
@@ -202,53 +215,88 @@ button {
 
 .source-block {
   margin-top: auto;
-  padding: 0 4px;
+  padding: 12px 10px 12px;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(232, 168, 74, 0.1), rgba(232, 168, 74, 0.03)),
+    rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(232, 168, 74, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .source-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.source-label-zh {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+
+.source-label-en {
   font-family: var(--font-display);
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-dim);
-  margin-bottom: 10px;
-  padding-left: 4px;
+  color: var(--accent);
 }
 
 .source-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .source-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
   border: 1px solid transparent;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.18);
   color: var(--text-soft);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  border-radius: var(--radius);
   text-align: left;
-  font-size: 0.85rem;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.source-btn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(243, 239, 232, 0.22);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .source-btn:hover {
   color: var(--text);
-  background: var(--bg-row-hover);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--line-strong);
 }
 
 .source-btn.on {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(232, 168, 74, 0.45);
+  color: #1a140c;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(232, 168, 74, 0.28);
 }
 
-.sidebar-foot {
-  padding: 12px 8px 0;
-  color: var(--text-dim);
-  font-size: 0.72rem;
-  line-height: 1.55;
+.source-btn.on .source-btn-dot {
+  background: #1a140c;
+  box-shadow: 0 0 0 3px rgba(26, 20, 12, 0.15);
 }
 
 /* ─── Main ──────────────────────────────────────────── */
@@ -1822,8 +1870,8 @@ button {
   }
 
   .brand-tag,
+  .brand-text,
   .source-block,
-  .sidebar-foot,
   .nav-label {
     display: none;
   }
@@ -1834,10 +1882,9 @@ button {
     padding: 0;
   }
 
-  .brand-name {
-    font-size: 1.1rem;
-    writing-mode: vertical-rl;
-    letter-spacing: 0.12em;
+  .brand-mark {
+    width: 36px;
+    height: 36px;
   }
 
   .sidebar {

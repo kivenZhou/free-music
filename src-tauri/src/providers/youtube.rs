@@ -4,16 +4,13 @@ use rusty_ytdl::{Video, VideoOptions, VideoQuality, VideoSearchOptions};
 use crate::models::{Chart, Playability, PlayUrl, Track};
 use super::{MusicProvider, ProviderError};
 
-pub struct YoutubeProvider {
-    cache_dir: PathBuf,
-}
+pub struct YoutubeProvider;
 
 impl YoutubeProvider {
     pub fn new(cache_dir: PathBuf) -> Self {
-        if !cache_dir.exists() {
-            let _ = std::fs::create_dir_all(&cache_dir);
-        }
-        Self { cache_dir }
+        // Reserved for future local cache; streams are remote for now.
+        let _ = std::fs::create_dir_all(&cache_dir);
+        Self
     }
 }
 
