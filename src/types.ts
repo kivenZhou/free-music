@@ -44,3 +44,5 @@ export interface ProviderInfo {
 }
 
 export type NavKey = "charts" | "search" | "favorites" | "history";
+
+export type RepeatMode = "off" | "all" | "one";

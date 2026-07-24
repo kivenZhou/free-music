@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Track } from "../types";
+import type { RepeatMode, Track } from "../types";
 import { providerLabel } from "../api";
 import {
   Play,
@@ -9,6 +9,12 @@ import {
   Loader2,
   Music2,
   Heart,
+  Shuffle,
+  Repeat,
+  Repeat1,
+  Volume2,
+  VolumeX,
+  ListMusic,
 } from "lucide-react";
 
 interface Props {
@@ -21,11 +27,22 @@ interface Props {
   hasPrev: boolean;
   hasNext: boolean;
   favorited: boolean;
+  shuffle: boolean;
+  repeatMode: RepeatMode;
+  volume: number;
+  muted: boolean;
+  queueOpen: boolean;
+  queueLength: number;
   onToggle: () => void;
   onPrev: () => void;
   onNext: () => void;
   onSeek: (ratio: number) => void;
   onToggleFavorite: () => void;
+  onToggleShuffle: () => void;
+  onCycleRepeat: () => void;
+  onVolume: (v: number) => void;
+  onToggleMute: () => void;
+  onToggleQueue: () => void;
 }
 
 function fmt(sec: number) {
@@ -55,6 +72,12 @@ function PlayerCover({ url }: { url?: string | null }) {
   );
 }
 
+function repeatTitle(mode: RepeatMode) {
+  if (mode === "one") return "单曲循环";
+  if (mode === "all") return "列表循环";
+  return "顺序播放";
+}
+
 export function PlayerBar({
   track,
   playing,
@@ -65,13 +88,25 @@ export function PlayerBar({
   hasPrev,
   hasNext,
   favorited,
+  shuffle,
+  repeatMode,
+  volume,
+  muted,
+  queueOpen,
+  queueLength,
   onToggle,
   onPrev,
   onNext,
   onSeek,
   onToggleFavorite,
+  onToggleShuffle,
+  onCycleRepeat,
+  onVolume,
+  onToggleMute,
+  onToggleQueue,
 }: Props) {
   const ratio = duration > 0 ? progress / duration : 0;
+  const shownVolume = muted ? 0 : volume;
 
   return (
     <footer className="player">
@@ -98,6 +133,14 @@ export function PlayerBar({
 
       <div className="player-controls">
         <div className="transport">
+          <button
+            className={`ctrl-btn ${shuffle ? "on" : ""}`}
+            type="button"
+            onClick={onToggleShuffle}
+            title={shuffle ? "关闭随机" : "随机播放"}
+          >
+            <Shuffle size={15} />
+          </button>
           <button
             className="ctrl-btn"
             type="button"
@@ -131,6 +174,14 @@ export function PlayerBar({
           >
             <SkipForward size={18} />
           </button>
+          <button
+            className={`ctrl-btn ${repeatMode !== "off" ? "on" : ""}`}
+            type="button"
+            onClick={onCycleRepeat}
+            title={repeatTitle(repeatMode)}
+          >
+            {repeatMode === "one" ? <Repeat1 size={15} /> : <Repeat size={15} />}
+          </button>
         </div>
 
         <div className="seek">
@@ -149,10 +200,36 @@ export function PlayerBar({
 
       <div className="player-aside">
         {error ? <div className="player-error">{error}</div> : null}
-        <div className="player-source">
-          <span className="live-dot" />
-          连播
+
+        <div className="volume-wrap">
+          <button
+            className="ctrl-btn"
+            type="button"
+            onClick={onToggleMute}
+            title={muted || volume === 0 ? "取消静音" : "静音"}
+          >
+            {muted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+          </button>
+          <input
+            className="volume-slider"
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(shownVolume * 100)}
+            onChange={(e) => onVolume(Number(e.target.value) / 100)}
+            title="音量"
+          />
         </div>
+
+        <button
+          className={`ctrl-btn queue-btn ${queueOpen ? "on" : ""}`}
+          type="button"
+          onClick={onToggleQueue}
+          title="播放队列"
+        >
+          <ListMusic size={16} />
+          {queueLength > 0 ? <span className="queue-badge">{queueLength}</span> : null}
+        </button>
       </div>
     </footer>
   );

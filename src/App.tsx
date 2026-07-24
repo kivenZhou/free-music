@@ -5,13 +5,32 @@ import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
 import { PlayerBar } from "./components/PlayerBar";
+import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
 import { TrendingUp, Search, Heart, History } from "lucide-react";
-import type { NavKey, ProviderInfo, Track } from "./types";
+import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import "./App.css";
 
 function favKey(t: Track) {
   return `${t.provider}:${t.id}`;
+}
+
+function readStoredVolume(): number {
+  const raw = localStorage.getItem("yinzhan-volume");
+  if (raw == null) return 0.85;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.85;
+}
+
+function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
+  if (list.length <= 1) return [...list];
+  const preferred = list[preferIndex] ?? list[0];
+  const rest = list.filter((_, i) => i !== preferIndex);
+  for (let i = rest.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  return [preferred, ...rest];
 }
 
 function App() {
@@ -31,14 +50,27 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  const [shuffle, setShuffle] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
+  const [volume, setVolume] = useState(readStoredVolume);
+  const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
+  const [queueOpen, setQueueOpen] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const queueRef = useRef<Track[]>([]);
   const queueIndexRef = useRef(-1);
+  const shuffleRef = useRef(false);
+  const repeatRef = useRef<RepeatMode>("off");
   const playTrackAtRef = useRef<(tracks: Track[], index: number) => void>(() => undefined);
+  const advanceRef = useRef<(dir: 1 | -1, opts?: { fromEnded?: boolean }) => void>(
+    () => undefined,
+  );
 
   const currentKey = current ? favKey(current) : null;
-  const hasPrev = queueIndex > 0;
-  const hasNext = queueIndex >= 0 && queueIndex < queue.length - 1;
+  const hasPrev = queue.length > 0 && (queueIndex > 0 || repeatMode === "all" || shuffle);
+  const hasNext =
+    queue.length > 0 &&
+    (queueIndex < queue.length - 1 || repeatMode === "all" || repeatMode === "one" || shuffle);
 
   useEffect(() => {
     queueRef.current = queue;
@@ -47,6 +79,14 @@ function App() {
   useEffect(() => {
     queueIndexRef.current = queueIndex;
   }, [queueIndex]);
+
+  useEffect(() => {
+    shuffleRef.current = shuffle;
+  }, [shuffle]);
+
+  useEffect(() => {
+    repeatRef.current = repeatMode;
+  }, [repeatMode]);
 
   const refreshFavorites = useCallback(async () => {
     const list = await api.listFavorites();
@@ -61,6 +101,11 @@ function App() {
     });
     refreshFavorites().catch(() => undefined);
   }, [refreshFavorites]);
+
+  const applyVolume = useCallback((vol: number, isMuted: boolean) => {
+    const audio = audioRef.current;
+    if (audio) audio.volume = isMuted ? 0 : vol;
+  }, []);
 
   const playTrackAt = useCallback(async (tracks: Track[], index: number) => {
     const track = tracks[index];
@@ -79,9 +124,6 @@ function App() {
 
     try {
       const resolved = await api.resolvePlayUrl(track);
-      if (!resolved.localPath && (track.provider === "kuwo" || track.provider === "kugou")) {
-        // Prefer cached for providers with flaky CDN certs; still allow direct if present
-      }
       const src = resolved.localPath
         ? convertFileSrc(resolved.localPath)
         : resolved.url;
@@ -93,10 +135,9 @@ function App() {
     } catch (e) {
       setPlaying(false);
       setPlayError(String(e).replace(/^Error:\s*/, ""));
-      // Auto-skip to next on failure
-      if (index < tracks.length - 1) {
+      if (index < tracks.length - 1 || repeatRef.current === "all") {
         window.setTimeout(() => {
-          void playTrackAtRef.current(tracks, index + 1);
+          advanceRef.current(1);
         }, 600);
       }
     } finally {
@@ -108,33 +149,63 @@ function App() {
     playTrackAtRef.current = playTrackAt;
   }, [playTrackAt]);
 
+  const advance = useCallback(
+    (dir: 1 | -1, opts?: { fromEnded?: boolean }) => {
+      const q = queueRef.current;
+      const i = queueIndexRef.current;
+      const mode = repeatRef.current;
+      if (q.length === 0 || i < 0) return;
+
+      // Auto-replay current track only when song ends in single-repeat mode
+      if (opts?.fromEnded && mode === "one") {
+        void playTrackAt(q, i);
+        return;
+      }
+
+      if (shuffleRef.current && q.length > 1) {
+        let next = Math.floor(Math.random() * q.length);
+        while (next === i) next = Math.floor(Math.random() * q.length);
+        void playTrackAt(q, next);
+        return;
+      }
+
+      let next = i + dir;
+      if (next < 0 || next >= q.length) {
+        if (mode === "all") {
+          next = (next + q.length) % q.length;
+        } else {
+          return;
+        }
+      }
+      void playTrackAt(q, next);
+    },
+    [playTrackAt],
+  );
+
+  useEffect(() => {
+    advanceRef.current = advance;
+  }, [advance]);
+
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "metadata";
+    audio.volume = muted ? 0 : volume;
     audioRef.current = audio;
 
     const onTime = () => setProgress(audio.currentTime);
     const onMeta = () => setDuration(audio.duration || 0);
     const onEnded = () => {
       setPlaying(false);
-      const q = queueRef.current;
-      const i = queueIndexRef.current;
-      if (i >= 0 && i < q.length - 1) {
-        void playTrackAtRef.current(q, i + 1);
-      }
+      advanceRef.current(1, { fromEnded: true });
     };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onErr = () => {
       setPlaying(false);
       setPlayError("播放失败，尝试下一首…");
-      const q = queueRef.current;
-      const i = queueIndexRef.current;
-      if (i >= 0 && i < q.length - 1) {
-        window.setTimeout(() => {
-          void playTrackAtRef.current(q, i + 1);
-        }, 500);
-      }
+      window.setTimeout(() => {
+        advanceRef.current(1);
+      }, 500);
     };
 
     audio.addEventListener("timeupdate", onTime);
@@ -154,29 +225,50 @@ function App() {
       audio.removeEventListener("error", onErr);
       audioRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    applyVolume(volume, muted);
+    localStorage.setItem("yinzhan-volume", String(volume));
+    localStorage.setItem("yinzhan-muted", muted ? "1" : "0");
+  }, [volume, muted, applyVolume]);
 
   const playFromList = useCallback(
     (track: Track, list: Track[]) => {
       const index = list.findIndex(
         (t) => t.id === track.id && t.provider === track.provider,
       );
-      void playTrackAt(list, index >= 0 ? index : 0);
+      const start = index >= 0 ? index : 0;
+      const ordered = shuffleRef.current ? shuffleTracks(list, start) : list;
+      const playIndex = shuffleRef.current ? 0 : start;
+      void playTrackAt(ordered, playIndex);
+    },
+    [playTrackAt],
+  );
+
+  const playAll = useCallback(
+    (list: Track[]) => {
+      if (list.length === 0) return;
+      const ordered = shuffleRef.current ? shuffleTracks(list, 0) : list;
+      void playTrackAt(ordered, 0);
     },
     [playTrackAt],
   );
 
   const playPrev = useCallback(() => {
-    const q = queueRef.current;
-    const i = queueIndexRef.current;
-    if (i > 0) void playTrackAt(q, i - 1);
-  }, [playTrackAt]);
+    const audio = audioRef.current;
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      setProgress(0);
+      return;
+    }
+    advance(-1);
+  }, [advance]);
 
   const playNext = useCallback(() => {
-    const q = queueRef.current;
-    const i = queueIndexRef.current;
-    if (i >= 0 && i < q.length - 1) void playTrackAt(q, i + 1);
-  }, [playTrackAt]);
+    advance(1);
+  }, [advance]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -188,17 +280,19 @@ function App() {
     }
   }, [current]);
 
-  const onSeek = useCallback((ratio: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    
-    // Prioritize backend-provided exact duration over browser's streaming estimate
-    const effectiveDur = current?.durationMs ? current.durationMs / 1000 : audio.duration;
-    if (!Number.isFinite(effectiveDur)) return;
-    
-    audio.currentTime = effectiveDur * ratio;
-    setProgress(audio.currentTime);
-  }, [current]);
+  const onSeek = useCallback(
+    (ratio: number) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const effectiveDur = current?.durationMs
+        ? current.durationMs / 1000
+        : audio.duration;
+      if (!Number.isFinite(effectiveDur)) return;
+      audio.currentTime = effectiveDur * ratio;
+      setProgress(audio.currentTime);
+    },
+    [current],
+  );
 
   const toggleFavorite = useCallback(
     async (track: Track) => {
@@ -213,10 +307,79 @@ function App() {
     [favoriteKeys, refreshFavorites],
   );
 
+  const toggleShuffle = useCallback(() => {
+    setShuffle((on) => {
+      const next = !on;
+      if (next && queueRef.current.length > 1 && queueIndexRef.current >= 0) {
+        const reshuffled = shuffleTracks(queueRef.current, queueIndexRef.current);
+        setQueue(reshuffled);
+        setQueueIndex(0);
+        queueRef.current = reshuffled;
+        queueIndexRef.current = 0;
+      }
+      return next;
+    });
+  }, []);
+
+  const cycleRepeat = useCallback(() => {
+    setRepeatMode((m) => (m === "off" ? "all" : m === "all" ? "one" : "off"));
+  }, []);
+
+  const setVolumeSafe = useCallback((v: number) => {
+    const clamped = Math.min(1, Math.max(0, v));
+    setVolume(clamped);
+    if (clamped > 0) setMuted(false);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    setMuted((m) => !m);
+  }, []);
+
   const goSearch = useCallback((q: string) => {
     setSearchSeed(q);
     setNav("search");
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+        return;
+      }
+      if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        playPrev();
+        return;
+      }
+      if (e.code === "ArrowRight") {
+        e.preventDefault();
+        playNext();
+        return;
+      }
+      if (e.code === "ArrowUp") {
+        e.preventDefault();
+        setVolumeSafe(volume + 0.05);
+        return;
+      }
+      if (e.code === "ArrowDown") {
+        e.preventDefault();
+        setVolumeSafe(volume - 0.05);
+        return;
+      }
+      if (e.key === "m" || e.key === "M") {
+        toggleMute();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [togglePlay, playPrev, playNext, setVolumeSafe, volume, toggleMute]);
 
   const navItems = useMemo(
     () =>
@@ -295,6 +458,7 @@ function App() {
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             onPlay={playFromList}
+            onPlayAll={playAll}
             onToggleFavorite={toggleFavorite}
           />
         ) : null}
@@ -303,6 +467,7 @@ function App() {
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             onPlay={playFromList}
+            onPlayAll={playAll}
             onToggleFavorite={toggleFavorite}
             initialQuery={searchSeed}
           />
@@ -312,12 +477,21 @@ function App() {
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             onPlay={playFromList}
+            onPlayAll={playAll}
             onToggleFavorite={toggleFavorite}
             refreshToken={favToken}
           />
         ) : null}
         {nav === "history" ? <HistoryView onSearch={goSearch} /> : null}
       </main>
+
+      <QueuePanel
+        open={queueOpen}
+        tracks={queue}
+        currentIndex={queueIndex}
+        onClose={() => setQueueOpen(false)}
+        onSelect={(index) => void playTrackAt(queue, index)}
+      />
 
       <PlayerBar
         track={current}
@@ -329,6 +503,12 @@ function App() {
         hasPrev={hasPrev}
         hasNext={hasNext}
         favorited={currentKey ? favoriteKeys.has(currentKey) : false}
+        shuffle={shuffle}
+        repeatMode={repeatMode}
+        volume={volume}
+        muted={muted}
+        queueOpen={queueOpen}
+        queueLength={queue.length}
         onToggle={togglePlay}
         onPrev={playPrev}
         onNext={playNext}
@@ -336,6 +516,11 @@ function App() {
         onToggleFavorite={() => {
           if (current) void toggleFavorite(current);
         }}
+        onToggleShuffle={toggleShuffle}
+        onCycleRepeat={cycleRepeat}
+        onVolume={setVolumeSafe}
+        onToggleMute={toggleMute}
+        onToggleQueue={() => setQueueOpen((o) => !o)}
       />
     </div>
   );

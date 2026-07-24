@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Play } from "lucide-react";
 import { api, providerLabel } from "../api";
 import type { Chart, Track } from "../types";
 import { SongList } from "./SongList";
@@ -8,6 +9,7 @@ interface Props {
   favoriteKeys: Set<string>;
   currentKey?: string | null;
   onPlay: (track: Track, queue: Track[]) => void;
+  onPlayAll: (tracks: Track[]) => void;
   onToggleFavorite: (track: Track) => void;
 }
 
@@ -15,6 +17,9 @@ const REGION_LABEL: Record<string, string> = {
   cn: "国内",
   kr: "韩国",
   jp: "日本",
+  us: "欧美",
+  bilibili: "B站",
+  youtube: "YT",
 };
 
 export function ChartsView({
@@ -22,6 +27,7 @@ export function ChartsView({
   favoriteKeys,
   currentKey,
   onPlay,
+  onPlayAll,
   onToggleFavorite,
 }: Props) {
   const [charts, setCharts] = useState<Chart[]>([]);
@@ -35,13 +41,20 @@ export function ChartsView({
     setTracks([]);
     setActive(null);
     setError(null);
+    let ignore = false;
     api
       .listCharts(providerId)
       .then((list) => {
+        if (ignore) return;
         setCharts(list);
         if (list[0]) setActive(list[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        if (!ignore) setError(String(e));
+      });
+    return () => {
+      ignore = true;
+    };
   }, [providerId]);
 
   useEffect(() => {
@@ -77,7 +90,17 @@ export function ChartsView({
           {current ? <p className="panel-desc">{current.description}</p> : null}
         </div>
         {!loading && tracks.length > 0 ? (
-          <div className="panel-head-meta">{tracks.length} 首可播</div>
+          <div className="panel-actions">
+            <span className="panel-head-meta">{tracks.length} 首可播</span>
+            <button
+              type="button"
+              className="play-all-btn"
+              onClick={() => onPlayAll(tracks)}
+            >
+              <Play size={14} fill="currentColor" />
+              全部播放
+            </button>
+          </div>
         ) : null}
       </header>
 

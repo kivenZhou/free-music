@@ -15,18 +15,6 @@ const FALLBACK_CHARTS: &[(&str, &str, &str, &str)] = &[
     ("5059661515", "日语榜", "jp", "日本流行"),
 ];
 
-fn region_for_name(name: &str) -> &'static str {
-    if name.contains("韩") {
-        "kr"
-    } else if name.contains("日") {
-        "jp"
-    } else if name.contains("欧美") || name.contains("UK") || name.contains("Billboard") {
-        "us"
-    } else {
-        "cn"
-    }
-}
-
 fn https_url(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("http://") {
         format!("https://{rest}")
@@ -337,37 +325,36 @@ impl MusicProvider for NeteaseProvider {
 
     async fn charts(&self) -> Result<Vec<Chart>, ProviderError> {
         let url = "https://music.163.com/api/toplist";
+        // Official core boards only — avoid matching every "*热歌榜*" / "*日本*" variant.
+        const OFFICIAL: &[(&str, &str, &str, &str)] = &[
+            ("3778678", "热歌榜", "cn", "网易云音乐热歌榜"),
+            ("3779629", "新歌榜", "cn", "华语/流行新歌"),
+            ("19723756", "飙升榜", "cn", "近期飙升曲目"),
+            ("2884035", "原创榜", "cn", "原创音乐榜"),
+            ("745956260", "韩语榜", "kr", "韩国流行"),
+            ("5059661515", "日语榜", "jp", "日本流行"),
+        ];
+
         if let Ok(resp) = self.client.get(url).send().await {
             if let Ok(json) = resp.json::<Value>().await {
                 if let Some(list) = json.get("list").and_then(|v| v.as_array()) {
-                    let preferred = ["热歌榜", "新歌榜", "飙升榜", "原创榜", "韩语榜", "日本"];
-                    let mut charts: Vec<Chart> = list
-                        .iter()
-                        .filter_map(|item| {
-                            let id = item.get("id")?.as_u64()?.to_string();
-                            let name = item.get("name")?.as_str()?.to_string();
-                            let keep = preferred.iter().any(|p| name.contains(p));
-                            if !keep {
-                                return None;
-                            }
-                            Some(Chart {
-                                id,
-                                region: region_for_name(&name).into(),
-                                description: item
-                                    .get("description")
-                                    .and_then(|d| d.as_str())
-                                    .unwrap_or("官方榜单")
-                                    .to_string(),
-                                name,
-                            })
-                        })
-                        .collect();
-                    charts.sort_by_key(|c| {
-                        preferred
-                            .iter()
-                            .position(|p| c.name.contains(p))
-                            .unwrap_or(99)
-                    });
+                    let mut charts = Vec::new();
+                    for (id, name, region, desc) in OFFICIAL {
+                        let exists = list.iter().any(|item| {
+                            item.get("id")
+                                .and_then(|v| v.as_u64())
+                                .map(|n| n.to_string() == *id)
+                                .unwrap_or(false)
+                        });
+                        if exists {
+                            charts.push(Chart {
+                                id: (*id).into(),
+                                name: (*name).into(),
+                                region: (*region).into(),
+                                description: (*desc).into(),
+                            });
+                        }
+                    }
                     if !charts.is_empty() {
                         return Ok(charts);
                     }

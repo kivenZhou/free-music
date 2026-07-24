@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Play } from "lucide-react";
 import { api } from "../api";
 import type { SearchHistoryItem, Track } from "../types";
 import { SongList } from "./SongList";
@@ -7,6 +8,7 @@ interface Props {
   favoriteKeys: Set<string>;
   currentKey?: string | null;
   onPlay: (track: Track, queue: Track[]) => void;
+  onPlayAll: (tracks: Track[]) => void;
   onToggleFavorite: (track: Track) => void;
   initialQuery?: string;
 }
@@ -15,6 +17,7 @@ export function SearchView({
   favoriteKeys,
   currentKey,
   onPlay,
+  onPlayAll,
   onToggleFavorite,
   initialQuery = "",
 }: Props) {
@@ -63,10 +66,22 @@ export function SearchView({
 
   return (
     <section className="panel">
-      <header className="panel-head">
-        <p className="eyebrow">Search</p>
-        <h1>搜索</h1>
-        <p>聚合多音源 · 仅返回免费完整曲</p>
+      <header className="panel-head row">
+        <div>
+          <p className="eyebrow">Search</p>
+          <h1>搜索</h1>
+          <p>聚合多音源 · 仅返回免费完整曲</p>
+        </div>
+        {!loading && tracks.length > 0 ? (
+          <button
+            type="button"
+            className="play-all-btn"
+            onClick={() => onPlayAll(tracks)}
+          >
+            <Play size={14} fill="currentColor" />
+            全部播放
+          </button>
+        ) : null}
       </header>
 
       <form className="search-form" onSubmit={onSubmit}>
