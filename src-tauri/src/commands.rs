@@ -167,6 +167,11 @@ pub fn clear_search_history(state: State<'_, Arc<AppState>>) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub fn remove_search_history(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
+    state.db.remove_search_history(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn add_favorite(state: State<'_, Arc<AppState>>, track: Track) -> Result<(), String> {
     state.db.add_favorite(&track).map_err(|e| e.to_string())
 }

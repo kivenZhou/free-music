@@ -62,7 +62,6 @@ export type NavKey =
   | "search"
   | "favorites"
   | "playlists"
-  | "history"
   | "settings";
 
 export type RepeatMode = "off" | "all" | "one";

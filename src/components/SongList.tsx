@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Track } from "../types";
 import { formatDuration, providerLabel } from "../api";
 import {
@@ -35,6 +35,11 @@ function keyOf(t: Track) {
 
 function Cover({ url }: { url?: string | null }) {
   const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    setBroken(false);
+  }, [url]);
+
   if (!url || broken) {
     return (
       <span className="cover-fallback" aria-hidden>
@@ -47,6 +52,7 @@ function Cover({ url }: { url?: string | null }) {
       src={url}
       alt=""
       loading="lazy"
+      referrerPolicy="no-referrer"
       onError={() => setBroken(true)}
     />
   );
@@ -109,16 +115,14 @@ export function SongList({
           <li
             key={key}
             className={`song-row ${active ? "active" : ""} ${active && playing ? "playing" : ""} ${hideProvider ? "no-src" : ""}`}
-            onDoubleClick={() => {
-              if (active && onTogglePlay) {
-                onTogglePlay();
-                return;
-              }
-              onPlay(t, tracks);
+            onClick={(e) => {
+              const el = e.target as HTMLElement;
+              if (el.closest(".row-actions, .cover-btn")) return;
+              onCoverClick();
             }}
           >
             <span className="idx">
-              {active ? (
+              {active && playing ? (
                 <PlayingBars />
               ) : (
                 String(i + 1).padStart(2, "0")
@@ -150,7 +154,10 @@ export function SongList({
               <span className="src">{providerLabel(t.provider)}</span>
             ) : null}
             <span className="dur">{formatDuration(t.durationMs)}</span>
-            <div className="row-actions">
+            <div
+              className="row-actions"
+              onClick={(e) => e.stopPropagation()}
+            >
               {onPlayNext ? (
                 <button
                   className="icon-btn"

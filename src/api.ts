@@ -32,6 +32,8 @@ export const api = {
   getSearchHistory: (limit = 20) =>
     invoke<SearchHistoryItem[]>("get_search_history", { limit }),
   clearSearchHistory: () => invoke<void>("clear_search_history"),
+  removeSearchHistory: (id: number) =>
+    invoke<void>("remove_search_history", { id }),
   addFavorite: (track: Track) => invoke<void>("add_favorite", { track }),
   removeFavorite: (provider: string, trackId: string) =>
     invoke<void>("remove_favorite", { provider, trackId }),
@@ -73,10 +75,14 @@ export interface LyricsPayload {
 }
 
 export function formatDuration(ms?: number | null): string {
-  if (!ms || ms <= 0) return "—:—";
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return "—:—";
   const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
