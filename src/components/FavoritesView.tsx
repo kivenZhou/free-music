@@ -13,6 +13,7 @@ interface Props {
   onPlayAll: (tracks: Track[]) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
   refreshToken: number;
 }
@@ -26,6 +27,7 @@ export function FavoritesView({
   onPlayAll,
   onPlayNext,
   onAddToQueue,
+  onAddToPlaylist,
   onToggleFavorite,
   refreshToken,
 }: Props) {
@@ -70,6 +72,7 @@ export function FavoritesView({
         onTogglePlay={onTogglePlay}
         onPlayNext={onPlayNext}
         onAddToQueue={onAddToQueue}
+        onAddToPlaylist={onAddToPlaylist}
         onToggleFavorite={onToggleFavorite}
       />
     </section>

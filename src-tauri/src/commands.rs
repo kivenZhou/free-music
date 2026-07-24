@@ -1,6 +1,8 @@
 use crate::cache::{self, CacheStats};
 use crate::db::Database;
-use crate::models::{Chart, FavoriteItem, PlayUrl, SearchHistoryItem, Track};
+use crate::models::{
+    Chart, FavoriteItem, PlayUrl, Playlist, PlaylistTrackItem, SearchHistoryItem, Track,
+};
 use crate::providers::ProviderRegistry;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -237,4 +239,67 @@ pub async fn fetch_lyrics(
         translated_lrc,
         source,
     })
+}
+
+#[tauri::command]
+pub fn list_playlists(state: State<'_, Arc<AppState>>) -> Result<Vec<Playlist>, String> {
+    state.db.list_playlists().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_playlist(state: State<'_, Arc<AppState>>, name: String) -> Result<Playlist, String> {
+    state.db.create_playlist(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn rename_playlist(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+    name: String,
+) -> Result<(), String> {
+    state
+        .db
+        .rename_playlist(id, &name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_playlist(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
+    state.db.delete_playlist(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_playlist_tracks(
+    state: State<'_, Arc<AppState>>,
+    playlist_id: i64,
+) -> Result<Vec<PlaylistTrackItem>, String> {
+    state
+        .db
+        .list_playlist_tracks(playlist_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_to_playlist(
+    state: State<'_, Arc<AppState>>,
+    playlist_id: i64,
+    track: Track,
+) -> Result<(), String> {
+    state
+        .db
+        .add_to_playlist(playlist_id, &track)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn remove_from_playlist(
+    state: State<'_, Arc<AppState>>,
+    playlist_id: i64,
+    provider: String,
+    track_id: String,
+) -> Result<(), String> {
+    state
+        .db
+        .remove_from_playlist(playlist_id, &provider, &track_id)
+        .map_err(|e| e.to_string())
 }

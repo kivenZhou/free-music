@@ -14,6 +14,7 @@ interface Props {
   onPlayAll: (tracks: Track[]) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
 }
 
@@ -40,6 +41,7 @@ export function ChartsView({
   onPlayAll,
   onPlayNext,
   onAddToQueue,
+  onAddToPlaylist,
   onToggleFavorite,
 }: Props) {
   const [charts, setCharts] = useState<Chart[]>([]);
@@ -210,6 +212,7 @@ export function ChartsView({
             onTogglePlay={onTogglePlay}
             onPlayNext={onPlayNext}
             onAddToQueue={onAddToQueue}
+            onAddToPlaylist={onAddToPlaylist}
             onToggleFavorite={onToggleFavorite}
             hideProvider
           />

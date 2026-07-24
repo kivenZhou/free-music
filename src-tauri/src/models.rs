@@ -56,3 +56,21 @@ pub struct FavoriteItem {
     pub track: Track,
     pub favorited_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    pub id: i64,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub track_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistTrackItem {
+    pub id: i64,
+    pub track: Track,
+    pub added_at: String,
+}

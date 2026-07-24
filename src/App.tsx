@@ -8,10 +8,12 @@ import { FavoritesView } from "./components/FavoritesView";
 import { HistoryView } from "./components/HistoryView";
 import { LyricsPanel, mergeLyrics, type LyricLine } from "./components/LyricsPanel";
 import { PlayerBar } from "./components/PlayerBar";
+import { PlaylistPicker } from "./components/PlaylistPicker";
+import { PlaylistsView } from "./components/PlaylistsView";
 import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
-import { TrendingUp, Search, Heart, History, Settings } from "lucide-react";
+import { TrendingUp, Search, Heart, History, Settings, ListMusic } from "lucide-react";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import "./App.css";
 
@@ -72,6 +74,8 @@ function App() {
   );
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [favToken, setFavToken] = useState(0);
+  const [playlistToken, setPlaylistToken] = useState(0);
+  const [playlistPickTrack, setPlaylistPickTrack] = useState<Track | null>(null);
   const [searchSeed, setSearchSeed] = useState("");
 
   const [queue, setQueue] = useState<Track[]>(() => storedQueue?.tracks ?? []);
@@ -784,6 +788,7 @@ function App() {
         { key: "charts" as const, label: "榜单", en: "Charts", icon: TrendingUp },
         { key: "search" as const, label: "搜索", en: "Search", icon: Search },
         { key: "favorites" as const, label: "收藏", en: "Saved", icon: Heart },
+        { key: "playlists" as const, label: "歌单", en: "Lists", icon: ListMusic },
         { key: "history" as const, label: "历史", en: "History", icon: History },
         { key: "settings" as const, label: "设置", en: "Prefs", icon: Settings },
       ] as const,
@@ -871,6 +876,7 @@ function App() {
             onPlayAll={playAll}
             onPlayNext={enqueueNext}
             onAddToQueue={addToQueue}
+            onAddToPlaylist={setPlaylistPickTrack}
             onToggleFavorite={toggleFavorite}
           />
         </div>
@@ -885,6 +891,7 @@ function App() {
             onPlayAll={playAll}
             onPlayNext={enqueueNext}
             onAddToQueue={addToQueue}
+            onAddToPlaylist={setPlaylistPickTrack}
             onToggleFavorite={toggleFavorite}
             initialQuery={searchSeed}
           />
@@ -899,8 +906,25 @@ function App() {
             onPlayAll={playAll}
             onPlayNext={enqueueNext}
             onAddToQueue={addToQueue}
+            onAddToPlaylist={setPlaylistPickTrack}
             onToggleFavorite={toggleFavorite}
             refreshToken={favToken}
+          />
+        </div>
+        <div className={`view-pane ${nav === "playlists" ? "on" : ""}`}>
+          <PlaylistsView
+            favoriteKeys={favoriteKeys}
+            currentKey={currentKey}
+            playing={playing}
+            onPlay={playFromList}
+            onTogglePlay={togglePlay}
+            onPlayAll={playAll}
+            onPlayNext={enqueueNext}
+            onAddToQueue={addToQueue}
+            onAddToPlaylist={setPlaylistPickTrack}
+            onToggleFavorite={toggleFavorite}
+            refreshToken={playlistToken}
+            active={nav === "playlists"}
           />
         </div>
         <div className={`view-pane ${nav === "history" ? "on" : ""}`}>
@@ -919,6 +943,13 @@ function App() {
       </main>
         </>
       ) : null}
+
+      <PlaylistPicker
+        open={Boolean(playlistPickTrack)}
+        track={playlistPickTrack}
+        onClose={() => setPlaylistPickTrack(null)}
+        onAdded={() => setPlaylistToken((n) => n + 1)}
+      />
 
       <QueuePanel
         open={!mini && queueOpen}

@@ -38,11 +38,31 @@ export interface FavoriteItem {
   favoritedAt: string;
 }
 
+export interface Playlist {
+  id: number;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  trackCount: number;
+}
+
+export interface PlaylistTrackItem {
+  id: number;
+  track: Track;
+  addedAt: string;
+}
+
 export interface ProviderInfo {
   id: string;
   name: string;
 }
 
-export type NavKey = "charts" | "search" | "favorites" | "history" | "settings";
+export type NavKey =
+  | "charts"
+  | "search"
+  | "favorites"
+  | "playlists"
+  | "history"
+  | "settings";
 
 export type RepeatMode = "off" | "all" | "one";

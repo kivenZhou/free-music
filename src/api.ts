@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Chart,
   FavoriteItem,
+  Playlist,
+  PlaylistTrackItem,
   PlayUrl,
   ProviderInfo,
   SearchHistoryItem,
@@ -41,6 +43,17 @@ export const api = {
       title: track.title,
       artist: track.artist,
     }),
+  listPlaylists: () => invoke<Playlist[]>("list_playlists"),
+  createPlaylist: (name: string) => invoke<Playlist>("create_playlist", { name }),
+  renamePlaylist: (id: number, name: string) =>
+    invoke<void>("rename_playlist", { id, name }),
+  deletePlaylist: (id: number) => invoke<void>("delete_playlist", { id }),
+  listPlaylistTracks: (playlistId: number) =>
+    invoke<PlaylistTrackItem[]>("list_playlist_tracks", { playlistId }),
+  addToPlaylist: (playlistId: number, track: Track) =>
+    invoke<void>("add_to_playlist", { playlistId, track }),
+  removeFromPlaylist: (playlistId: number, provider: string, trackId: string) =>
+    invoke<void>("remove_from_playlist", { playlistId, provider, trackId }),
 };
 
 export interface CacheStats {

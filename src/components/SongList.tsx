@@ -1,7 +1,16 @@
 import { useState } from "react";
 import type { Track } from "../types";
 import { formatDuration, providerLabel } from "../api";
-import { Play, Pause, Heart, Music2, ListPlus, ListEnd } from "lucide-react";
+import {
+  Play,
+  Pause,
+  Heart,
+  Music2,
+  ListPlus,
+  ListEnd,
+  FolderPlus,
+  Trash2,
+} from "lucide-react";
 
 interface Props {
   tracks: Track[];
@@ -14,6 +23,8 @@ interface Props {
   onToggleFavorite: (track: Track) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
+  onRemoveTrack?: (track: Track) => void;
   /** Hide per-row provider badge (e.g. charts already scoped to one source). */
   hideProvider?: boolean;
 }
@@ -61,6 +72,8 @@ export function SongList({
   onToggleFavorite,
   onPlayNext,
   onAddToQueue,
+  onAddToPlaylist,
+  onRemoveTrack,
   hideProvider = false,
 }: Props) {
   if (tracks.length === 0) {
@@ -156,6 +169,26 @@ export function SongList({
                   onClick={() => onAddToQueue(t)}
                 >
                   <ListPlus size={15} />
+                </button>
+              ) : null}
+              {onAddToPlaylist ? (
+                <button
+                  className="icon-btn"
+                  type="button"
+                  title="加入歌单"
+                  onClick={() => onAddToPlaylist(t)}
+                >
+                  <FolderPlus size={15} />
+                </button>
+              ) : null}
+              {onRemoveTrack ? (
+                <button
+                  className="icon-btn"
+                  type="button"
+                  title="从歌单移除"
+                  onClick={() => onRemoveTrack(t)}
+                >
+                  <Trash2 size={15} />
                 </button>
               ) : null}
               <button

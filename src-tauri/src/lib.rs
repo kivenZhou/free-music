@@ -96,6 +96,13 @@ pub fn run() {
             commands::get_cache_stats,
             commands::clear_audio_cache,
             commands::fetch_lyrics,
+            commands::list_playlists,
+            commands::create_playlist,
+            commands::rename_playlist,
+            commands::delete_playlist,
+            commands::list_playlist_tracks,
+            commands::add_to_playlist,
+            commands::remove_from_playlist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

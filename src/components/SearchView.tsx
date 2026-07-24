@@ -14,6 +14,7 @@ interface Props {
   onPlayAll: (tracks: Track[]) => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
   initialQuery?: string;
 }
@@ -28,6 +29,7 @@ export function SearchView({
   onPlayAll,
   onPlayNext,
   onAddToQueue,
+  onAddToPlaylist,
   onToggleFavorite,
   initialQuery = "",
 }: Props) {
@@ -176,6 +178,7 @@ export function SearchView({
             onTogglePlay={onTogglePlay}
             onPlayNext={onPlayNext}
             onAddToQueue={onAddToQueue}
+            onAddToPlaylist={onAddToPlaylist}
             onToggleFavorite={onToggleFavorite}
           />
         </div>

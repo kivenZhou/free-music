@@ -425,6 +425,235 @@ button {
   font-size: 0.85rem;
 }
 
+/* ─── Playlists ─────────────────────────────────────── */
+
+.playlists-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  min-height: 360px;
+}
+
+.playlist-rail {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.playlist-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.playlist-rail-empty {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  padding: 12px 4px;
+}
+
+.playlist-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.playlist-rail-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+}
+
+.playlist-rail-item:hover {
+  background: var(--bg-row-hover);
+  color: var(--text);
+}
+
+.playlist-rail-item.on {
+  background: var(--bg-row-active);
+  color: var(--accent);
+}
+
+.playlist-rail-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-rail-count {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.playlist-create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.playlist-create input {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  padding: 6px 10px;
+}
+
+.playlist-main-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.playlist-main-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-family: var(--font-display);
+}
+
+.playlist-main-head p {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.playlist-main-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ghost-btn.danger {
+  color: var(--danger);
+}
+
+.playlist-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.playlist-picker {
+  width: min(420px, 100%);
+  max-height: min(520px, 90vh);
+  overflow: auto;
+  background: #1a1714;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  padding: 14px;
+}
+
+.playlist-picker-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+.playlist-picker-head > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.playlist-picker-head > .icon-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.playlist-picker-head strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.playlist-picker-head p {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.playlist-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.playlist-picker-list button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.playlist-picker-list button:hover:not(:disabled) {
+  border-color: rgba(232, 168, 74, 0.45);
+  background: rgba(232, 168, 74, 0.08);
+}
+
+.playlist-picker-list small {
+  color: var(--text-dim);
+}
+
+.playlist-picker-empty {
+  padding: 16px 4px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.playlist-picker-new {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 960px) {
+  .playlists-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .panel-actions {
   display: flex;
   align-items: center;
@@ -749,7 +978,8 @@ button {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  margin: 0 auto;
+  margin: 0;
+  flex-shrink: 0;
   transition: color 0.15s ease, background 0.15s ease;
 }
 
