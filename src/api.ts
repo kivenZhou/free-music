@@ -54,6 +54,8 @@ export function providerLabel(id: string): string {
       return "B站";
     case "youtube":
       return "YouTube";
+    case "migu":
+      return "咪咕";
     default:
       return id;
   }

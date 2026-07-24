@@ -619,7 +619,7 @@ function App() {
       </aside>
 
       <main className="main">
-        {nav === "charts" ? (
+        <div className={`view-pane ${nav === "charts" ? "on" : ""}`}>
           <ChartsView
             providerId={providerId}
             favoriteKeys={favoriteKeys}
@@ -631,8 +631,8 @@ function App() {
             onAddToQueue={addToQueue}
             onToggleFavorite={toggleFavorite}
           />
-        ) : null}
-        {nav === "search" ? (
+        </div>
+        <div className={`view-pane ${nav === "search" ? "on" : ""}`}>
           <SearchView
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
@@ -644,8 +644,8 @@ function App() {
             onToggleFavorite={toggleFavorite}
             initialQuery={searchSeed}
           />
-        ) : null}
-        {nav === "favorites" ? (
+        </div>
+        <div className={`view-pane ${nav === "favorites" ? "on" : ""}`}>
           <FavoritesView
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
@@ -657,8 +657,10 @@ function App() {
             onToggleFavorite={toggleFavorite}
             refreshToken={favToken}
           />
-        ) : null}
-        {nav === "history" ? <HistoryView onSearch={goSearch} /> : null}
+        </div>
+        <div className={`view-pane ${nav === "history" ? "on" : ""}`}>
+          <HistoryView onSearch={goSearch} />
+        </div>
       </main>
 
       <QueuePanel

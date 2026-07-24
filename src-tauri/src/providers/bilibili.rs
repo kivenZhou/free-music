@@ -351,7 +351,7 @@ impl MusicProvider for BilibiliProvider {
     }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Vec<Track>, ProviderError> {
-        let candidates = self.search_raw(query, limit, true).await?;
+        let candidates = self.search_raw(query, limit, false).await?;
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 

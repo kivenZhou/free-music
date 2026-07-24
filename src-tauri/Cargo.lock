@@ -6159,6 +6159,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "directories",
+ "futures",
  "once_cell",
  "reqwest 0.12.28",
  "rusqlite",

@@ -12,6 +12,7 @@ pub use youtube::YoutubeProvider;
 
 use crate::models::{Chart, PlayUrl, Track};
 use async_trait::async_trait;
+use futures::future::join_all;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -48,6 +49,7 @@ impl ProviderRegistry {
                 Box::new(NeteaseProvider::new(audio.join("netease"))),
                 Box::new(KugouProvider::new(audio.join("kugou"))),
                 Box::new(KuwoProvider::new(audio.join("kuwo"))),
+                // 咪咕：公开搜索可用，但免费播放地址接口已关闭，暂不接入
                 Box::new(YoutubeProvider::new(audio.join("youtube"))),
             ],
         }
@@ -72,13 +74,34 @@ impl ProviderRegistry {
     }
 
     pub async fn search_all(&self, query: &str, limit: u32) -> Vec<Track> {
-        let per = ((limit as usize) / self.providers.len().max(1)).max(6) as u32;
+        let want_youtube =
+            query.contains("youtube.com") || query.contains("youtu.be") || query.contains("yt:");
+
+        // YouTube is much slower — only include when the query looks like a YT link/keyword.
+        let active: Vec<&dyn MusicProvider> = self
+            .providers
+            .iter()
+            .map(|p| p.as_ref())
+            .filter(|p| want_youtube || p.id() != "youtube")
+            .collect();
+
+        let n = active.len().max(1);
+        let per = ((limit as usize) / n).max(8).min(16) as u32;
+
+        // Parallel fan-out — sequential search was the main latency source.
+        let futs = active.iter().map(|p| p.search(query, per));
+        let results = join_all(futs).await;
+
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for p in &self.providers {
-            if let Ok(tracks) = p.search(query, per).await {
+        for res in results {
+            if let Ok(tracks) = res {
                 for t in tracks {
-                    let key = format!("{}:{}", t.title.to_lowercase(), t.artist.to_lowercase());
+                    let key = format!(
+                        "{}:{}",
+                        t.title.to_lowercase(),
+                        t.artist.to_lowercase()
+                    );
                     if seen.insert(key) {
                         out.push(t);
                     }
@@ -108,6 +131,9 @@ impl ProviderRegistry {
             };
             for p in &self.providers {
                 if p.id() == provider {
+                    continue;
+                }
+                if p.id() == "youtube" {
                     continue;
                 }
                 if let Ok(tracks) = p.search(&q, 5).await {

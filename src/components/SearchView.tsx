@@ -32,6 +32,7 @@ export function SearchView({
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
 
   const refreshHistory = () => {
     api.getSearchHistory().then(setHistory).catch(() => undefined);
@@ -54,8 +55,9 @@ export function SearchView({
     if (!text) return;
     setLoading(true);
     setError(null);
+    setSearched(true);
     try {
-      const result = await api.searchTracks(text, 30, "all");
+      const result = await api.searchTracks(text, 40, "all");
       setTracks(result);
       refreshHistory();
     } catch (e) {
@@ -76,7 +78,7 @@ export function SearchView({
         <div>
           <p className="eyebrow">Search</p>
           <h1>搜索</h1>
-          <p>聚合多音源 · 仅返回免费完整曲</p>
+          <p>并行聚合 B站 / 网易云 / 酷狗 / 酷我 · 仅免费完整曲</p>
         </div>
         {!loading && tracks.length > 0 ? (
           <button
@@ -95,7 +97,6 @@ export function SearchView({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="歌名、艺人、关键词"
-          autoFocus
         />
         <button type="submit" disabled={loading}>
           {loading ? "筛选中" : "搜索"}
@@ -121,18 +122,22 @@ export function SearchView({
       ) : null}
 
       {error ? <div className="error-banner">{error}</div> : null}
-      {loading ? <div className="empty">正在筛选可免费完整播放的歌曲…</div> : null}
-      {!loading ? (
-        <SongList
-          tracks={tracks}
-          currentKey={currentKey}
-          playing={playing}
-          favoriteKeys={favoriteKeys}
-          onPlay={onPlay}
-          onPlayNext={onPlayNext}
-          onAddToQueue={onAddToQueue}
-          onToggleFavorite={onToggleFavorite}
-        />
+      {loading && tracks.length === 0 ? (
+        <div className="empty">正在并行搜索各音源…</div>
+      ) : null}
+      {searched && !(loading && tracks.length === 0) ? (
+        <div className={loading ? "list-dim" : undefined}>
+          <SongList
+            tracks={tracks}
+            currentKey={currentKey}
+            playing={playing}
+            favoriteKeys={favoriteKeys}
+            onPlay={onPlay}
+            onPlayNext={onPlayNext}
+            onAddToQueue={onAddToQueue}
+            onToggleFavorite={onToggleFavorite}
+          />
+        </div>
       ) : null}
     </section>
   );

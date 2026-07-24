@@ -250,6 +250,16 @@ button {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 28px 36px 24px;
+  position: relative;
+}
+
+.view-pane {
+  display: none;
+}
+
+.view-pane.on {
+  display: block;
+  animation: fadeIn 0.18s ease both;
 }
 
 .main::-webkit-scrollbar {
