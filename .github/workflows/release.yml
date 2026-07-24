@@ -25,7 +25,7 @@ jobs:
             name: macos-x64
           - platform: windows-latest
             rust_target: ""
-            args: ""
+            args: --bundles nsis
             name: windows-x64
 
     runs-on: ${{ matrix.platform }}

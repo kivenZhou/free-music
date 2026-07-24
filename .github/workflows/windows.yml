@@ -1,0 +1,69 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend deps
+        run: npm ci
+
+      # Skip MSI/WiX — Chinese product names break light.exe; NSIS produces .exe installers.
+      - name: Build Windows NSIS installer
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Collect and rename package
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist-packages
+          shopt -s nullglob
+          for f in src-tauri/target/release/bundle/nsis/*.exe; do
+            cp "$f" "dist-packages/YinZhan_${VERSION}_windows_x64-setup.exe"
+          done
+          ls -lh dist-packages
+          test -n "$(ls -A dist-packages)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yinzhan-windows-x64
+          path: dist-packages/*
+          if-no-files-found: error
+
+      - name: Attach to latest GitHub Release
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          echo "Uploading to release: $TAG"
+          gh release upload "$TAG" dist-packages/* --clobber
