@@ -328,10 +328,14 @@ function App() {
         duration={current?.durationMs ? current.durationMs / 1000 : duration}
         hasPrev={hasPrev}
         hasNext={hasNext}
+        favorited={currentKey ? favoriteKeys.has(currentKey) : false}
         onToggle={togglePlay}
         onPrev={playPrev}
         onNext={playNext}
         onSeek={onSeek}
+        onToggleFavorite={() => {
+          if (current) void toggleFavorite(current);
+        }}
       />
     </div>
   );

@@ -1,7 +1,15 @@
 import { useState } from "react";
 import type { Track } from "../types";
 import { providerLabel } from "../api";
-import { Play, Pause, SkipBack, SkipForward, Loader2, Music2 } from "lucide-react";
+import {
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  Loader2,
+  Music2,
+  Heart,
+} from "lucide-react";
 
 interface Props {
   track: Track | null;
@@ -12,10 +20,12 @@ interface Props {
   duration: number;
   hasPrev: boolean;
   hasNext: boolean;
+  favorited: boolean;
   onToggle: () => void;
   onPrev: () => void;
   onNext: () => void;
   onSeek: (ratio: number) => void;
+  onToggleFavorite: () => void;
 }
 
 function fmt(sec: number) {
@@ -54,10 +64,12 @@ export function PlayerBar({
   duration,
   hasPrev,
   hasNext,
+  favorited,
   onToggle,
   onPrev,
   onNext,
   onSeek,
+  onToggleFavorite,
 }: Props) {
   const ratio = duration > 0 ? progress / duration : 0;
 
@@ -73,6 +85,15 @@ export function PlayerBar({
               : "选一首免费完整曲开始"}
           </div>
         </div>
+        <button
+          className={`icon-btn player-fav ${favorited ? "on" : ""}`}
+          type="button"
+          disabled={!track}
+          title={favorited ? "取消收藏" : "收藏"}
+          onClick={onToggleFavorite}
+        >
+          <Heart size={16} fill={favorited ? "currentColor" : "none"} />
+        </button>
       </div>
 
       <div className="player-controls">
@@ -94,11 +115,11 @@ export function PlayerBar({
             title={playing ? "暂停" : "播放"}
           >
             {loading ? (
-              <Loader2 className="animate-spin" size={20} />
+              <Loader2 className="animate-spin" size={18} />
             ) : playing ? (
-              <Pause size={20} fill="currentColor" />
+              <Pause size={18} fill="currentColor" />
             ) : (
-              <Play size={20} fill="currentColor" style={{ marginLeft: "2px" }} />
+              <Play size={18} fill="currentColor" style={{ marginLeft: "2px" }} />
             )}
           </button>
           <button
@@ -111,6 +132,7 @@ export function PlayerBar({
             <SkipForward size={18} />
           </button>
         </div>
+
         <div className="seek">
           <span>{fmt(progress)}</span>
           <input
@@ -123,12 +145,14 @@ export function PlayerBar({
           />
           <span>{fmt(duration)}</span>
         </div>
-        {error ? <div className="player-error">{error}</div> : null}
       </div>
 
-      <div className="player-source">
-        <span className="live-dot" />
-        应用内连播
+      <div className="player-aside">
+        {error ? <div className="player-error">{error}</div> : null}
+        <div className="player-source">
+          <span className="live-dot" />
+          连播
+        </div>
       </div>
     </footer>
   );

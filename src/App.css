@@ -673,7 +673,7 @@ button {
   grid-row: 2;
   height: var(--player-h);
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.4fr) minmax(140px, 1fr);
+  grid-template-columns: minmax(200px, 1fr) minmax(320px, 2fr) minmax(120px, 1fr);
   align-items: center;
   gap: 16px;
   padding: 0 20px;
@@ -702,6 +702,7 @@ button {
 
 .player-meta {
   min-width: 0;
+  flex: 1;
 }
 
 .player-title {
@@ -722,26 +723,37 @@ button {
   text-overflow: ellipsis;
 }
 
+.player-fav {
+  flex-shrink: 0;
+}
+
+.player-fav:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
 .player-controls {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 14px;
   min-width: 0;
+  width: 100%;
 }
 
 .transport {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .ctrl-btn {
   border: 0;
   background: transparent;
   color: var(--text-soft);
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -759,8 +771,8 @@ button {
 }
 
 .play-btn {
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   padding: 0;
   display: grid;
@@ -779,11 +791,11 @@ button {
 }
 
 .seek {
-  width: 100%;
-  max-width: 420px;
+  flex: 1;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 40px 1fr 40px;
-  gap: 10px;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  gap: 8px;
   align-items: center;
   color: var(--text-dim);
   font-family: var(--font-display);
@@ -814,17 +826,24 @@ button {
   opacity: 0.4;
 }
 
+.player-aside {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .player-error {
   color: var(--danger);
   font-size: 0.72rem;
-  max-width: 100%;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .player-source {
-  justify-self: end;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -834,6 +853,7 @@ button {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
+  white-space: nowrap;
 }
 
 .live-dot {
@@ -917,10 +937,14 @@ button {
   }
 
   .player-controls {
-    grid-column: 2;
+    gap: 8px;
   }
 
   .seek {
+    display: none;
+  }
+
+  .player-aside {
     display: none;
   }
 
