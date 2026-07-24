@@ -14,18 +14,44 @@ import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { TrendingUp, Search, Heart, Settings, ListMusic } from "lucide-react";
+import { TrendingUp, Search, Heart, Settings, ListMusic, GripVertical } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import { checkForInstallableUpdate } from "./updater";
 import "./App.css";
 
 const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
+const PROVIDER_ORDER_KEY = "yinzhan-provider-order";
 const NORMAL_MIN = { width: 900, height: 600 };
 const MINI_SIZE = { width: 480, height: 96 };
 
 function favKey(t: Track) {
   return `${t.provider}:${t.id}`;
+}
+
+function loadProviderOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(PROVIDER_ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string");
+  } catch {
+    return [];
+  }
+}
+
+function sortProvidersByOrder(
+  list: ProviderInfo[],
+  order: string[],
+): ProviderInfo[] {
+  if (order.length === 0) return list;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return [...list].sort((a, b) => {
+    const ai = rank.has(a.id) ? (rank.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
+    const bi = rank.has(b.id) ? (rank.get(b.id) as number) : Number.MAX_SAFE_INTEGER;
+    return ai - bi;
+  });
 }
 
 function loadStoredQueue(): { tracks: Track[]; index: number } | null {
@@ -147,6 +173,15 @@ function App() {
     () => localStorage.getItem("yinzhan-auto-skip") !== "0",
   );
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [dragSourceId, setDragSourceId] = useState<string | null>(null);
+  const [dragOverSourceId, setDragOverSourceId] = useState<string | null>(null);
+  const sourceListRef = useRef<HTMLDivElement | null>(null);
+  const sourceDragRef = useRef<{
+    id: string;
+    startY: number;
+    moved: boolean;
+    pointerId: number;
+  } | null>(null);
 
   const queueReadyRef = useRef(false);
 
@@ -239,12 +274,13 @@ function App() {
 
   useEffect(() => {
     api.listProviders().then((ps) => {
-      setProviders(ps);
+      const ordered = sortProvidersByOrder(ps, loadProviderOrder());
+      setProviders(ordered);
       const saved = localStorage.getItem("yinzhan-provider");
-      if (saved && ps.some((p) => p.id === saved)) {
+      if (saved && ordered.some((p) => p.id === saved)) {
         setProviderId(saved);
-      } else if (ps[0]) {
-        setProviderId(ps[0].id);
+      } else if (ordered[0]) {
+        setProviderId(ordered[0].id);
       }
     });
     refreshFavorites().catch(() => undefined);
@@ -253,6 +289,42 @@ function App() {
   useEffect(() => {
     localStorage.setItem("yinzhan-provider", providerId);
   }, [providerId]);
+
+  const reorderProviders = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setProviders((prev) => {
+      const from = prev.findIndex((p) => p.id === fromId);
+      const to = prev.findIndex((p) => p.id === toId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      localStorage.setItem(
+        PROVIDER_ORDER_KEY,
+        JSON.stringify(next.map((p) => p.id)),
+      );
+      return next;
+    });
+  }, []);
+
+  const hitSourceAtY = useCallback((clientY: number): string | null => {
+    const root = sourceListRef.current;
+    if (!root) return null;
+    const nodes = root.querySelectorAll<HTMLElement>("[data-source-id]");
+    for (const el of nodes) {
+      const rect = el.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        return el.dataset.sourceId || null;
+      }
+    }
+    return null;
+  }, []);
+
+  const endSourceDrag = useCallback(() => {
+    sourceDragRef.current = null;
+    setDragSourceId(null);
+    setDragOverSourceId(null);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("yinzhan-shuffle", shuffle ? "1" : "0");
@@ -850,7 +922,7 @@ function App() {
     <div className={`app ${mini ? "mini" : ""}`}>
       {!mini ? (
         <>
-      <aside className="sidebar">
+      <aside className={`sidebar ${dragSourceId ? "is-sorting-sources" : ""}`}>
         <div className="brand">
           <BrandMark className="brand-mark" size={42} />
           <div className="brand-text">
@@ -886,17 +958,89 @@ function App() {
                 <span className="source-label-zh">音源</span>
                 <span className="source-label-en">Source</span>
               </div>
-              <div className="source-list">
+              <div
+                className="source-list"
+                role="list"
+                ref={sourceListRef}
+              >
                 {providers.map((p) => (
-                  <button
+                  <div
                     key={p.id}
-                    type="button"
-                    className={`source-btn ${providerId === p.id ? "on" : ""}`}
-                    onClick={() => setProviderId(p.id)}
+                    role="listitem"
+                    data-source-id={p.id}
+                    className={[
+                      "source-btn",
+                      providerId === p.id ? "on" : "",
+                      dragSourceId === p.id ? "dragging" : "",
+                      dragOverSourceId === p.id && dragSourceId !== p.id
+                        ? "drag-over"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                   >
-                    <span className="source-btn-dot" aria-hidden />
-                    {providerLabel(p.id)}
-                  </button>
+                    <button
+                      type="button"
+                      className="source-grip"
+                      title="拖动排序"
+                      aria-label={`拖动调整 ${providerLabel(p.id)} 顺序`}
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        (e.currentTarget as HTMLElement).setPointerCapture(
+                          e.pointerId,
+                        );
+                        sourceDragRef.current = {
+                          id: p.id,
+                          startY: e.clientY,
+                          moved: false,
+                          pointerId: e.pointerId,
+                        };
+                        setDragSourceId(p.id);
+                        setDragOverSourceId(null);
+                      }}
+                      onPointerMove={(e) => {
+                        const drag = sourceDragRef.current;
+                        if (!drag || drag.pointerId !== e.pointerId) return;
+                        if (Math.abs(e.clientY - drag.startY) > 4) {
+                          drag.moved = true;
+                        }
+                        if (!drag.moved) return;
+                        const over = hitSourceAtY(e.clientY);
+                        setDragOverSourceId(
+                          over && over !== drag.id ? over : null,
+                        );
+                      }}
+                      onPointerUp={(e) => {
+                        const drag = sourceDragRef.current;
+                        if (!drag || drag.pointerId !== e.pointerId) return;
+                        try {
+                          (e.currentTarget as HTMLElement).releasePointerCapture(
+                            e.pointerId,
+                          );
+                        } catch {
+                          /* already released */
+                        }
+                        const over = drag.moved ? hitSourceAtY(e.clientY) : null;
+                        if (over && over !== drag.id) {
+                          reorderProviders(drag.id, over);
+                        }
+                        endSourceDrag();
+                      }}
+                      onPointerCancel={() => endSourceDrag()}
+                    >
+                      <GripVertical size={14} strokeWidth={2} />
+                    </button>
+                    <button
+                      type="button"
+                      className="source-pick"
+                      onClick={() => setProviderId(p.id)}
+                    >
+                      <span className="source-btn-dot" aria-hidden />
+                      {providerLabel(p.id)}
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>

@@ -157,20 +157,49 @@ impl AudiusProvider {
         Ok(list.iter().filter_map(Self::map_track).collect())
     }
 
-    /// Prefer embedded signed stream URL; fall back to /stream redirect.
-    async fn resolve_stream(&self, track_id: &str) -> Result<String, ProviderError> {
+    /// Collect primary stream URL + host mirrors (same path/query on alternate nodes).
+    fn collect_stream_urls(item: &Value) -> Vec<String> {
+        let mut urls = Vec::new();
+        let Some(primary) = item
+            .pointer("/stream/url")
+            .and_then(|v| v.as_str())
+            .filter(|u| u.starts_with("http"))
+        else {
+            return urls;
+        };
+        urls.push(primary.to_string());
+
+        if let Ok(parsed) = reqwest::Url::parse(primary) {
+            let path = parsed.path();
+            let query = parsed
+                .query()
+                .map(|q| format!("?{q}"))
+                .unwrap_or_default();
+            if let Some(mirrors) = item.pointer("/stream/mirrors").and_then(|v| v.as_array()) {
+                for m in mirrors {
+                    let Some(base) = m.as_str() else { continue };
+                    let base = base.trim_end_matches('/');
+                    let candidate = format!("{base}{path}{query}");
+                    if !urls.iter().any(|x| x == &candidate) {
+                        urls.push(candidate);
+                    }
+                }
+            }
+        }
+        urls
+    }
+
+    /// Prefer embedded signed stream URL(s); fall back to /stream redirect.
+    async fn resolve_stream_candidates(&self, track_id: &str) -> Result<Vec<String>, ProviderError> {
         let detail = format!("{API}/v1/tracks/{track_id}?app_name={APP_NAME}");
         if let Ok(json) = self.get_json(&detail).await {
             if let Some(item) = json.get("data") {
                 if Self::map_track(item).is_none() {
                     return Err(ProviderError::Msg("该曲不可免费完整播放".into()));
                 }
-                if let Some(url) = item
-                    .pointer("/stream/url")
-                    .and_then(|v| v.as_str())
-                    .filter(|u| u.starts_with("http"))
-                {
-                    return Ok(url.to_string());
+                let urls = Self::collect_stream_urls(item);
+                if !urls.is_empty() {
+                    return Ok(urls);
                 }
             }
         }
@@ -188,10 +217,42 @@ impl AudiusProvider {
                 resp.status()
             )));
         }
-        Ok(resp.url().to_string())
+        Ok(vec![resp.url().to_string()])
     }
 
-    async fn download_to_cache(&self, track_id: &str, remote: &str) -> Result<PathBuf, ProviderError> {
+    async fn first_reachable(&self, urls: &[String]) -> Result<String, ProviderError> {
+        let mut last = ProviderError::Msg("Audius 线路均不可用".into());
+        for remote in urls {
+            match self
+                .client
+                .get(remote)
+                .header(reqwest::header::RANGE, "bytes=0-2047")
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() || status.as_u16() == 206 {
+                        if let Ok(bytes) = resp.bytes().await {
+                            if bytes.len() >= 64 {
+                                return Ok(remote.clone());
+                            }
+                            last = ProviderError::Msg("Audius 线路返回空数据".into());
+                            continue;
+                        }
+                        return Ok(remote.clone());
+                    }
+                    last = ProviderError::Msg(format!("Audius 线路 HTTP {status}"));
+                }
+                Err(e) => {
+                    last = ProviderError::Msg(format!("Audius 线路错误: {e}"));
+                }
+            }
+        }
+        Err(last)
+    }
+
+    async fn download_to_cache(&self, track_id: &str, urls: &[String]) -> Result<PathBuf, ProviderError> {
         let path = self.cache_dir.join(format!("audius_{track_id}.mp3"));
         if path.exists() {
             if let Ok(meta) = std::fs::metadata(&path) {
@@ -200,22 +261,45 @@ impl AudiusProvider {
                 }
             }
         }
-        let resp = self.client.get(remote).send().await?;
-        if !resp.status().is_success() {
-            return Err(ProviderError::Msg(format!(
-                "Audius 下载失败 HTTP {}",
-                resp.status()
-            )));
+
+        let mut last = ProviderError::Msg("Audius 下载失败".into());
+        for remote in urls {
+            let resp = match self.client.get(remote).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    last = ProviderError::Msg(format!("Audius 下载失败: {e}"));
+                    continue;
+                }
+            };
+            if !resp.status().is_success() {
+                last = ProviderError::Msg(format!("Audius 下载失败 HTTP {}", resp.status()));
+                continue;
+            }
+            let bytes = match resp.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    last = ProviderError::Msg(format!("Audius 下载中断: {e}"));
+                    continue;
+                }
+            };
+            if bytes.len() < 20_000 {
+                last = ProviderError::Msg("Audius 音源过小，换线路重试".into());
+                continue;
+            }
+            let tmp = path.with_extension("mp3.part");
+            if std::fs::write(&tmp, &bytes).is_err() {
+                last = ProviderError::Msg("写入缓存失败".into());
+                continue;
+            }
+            if std::fs::rename(&tmp, &path).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+                last = ProviderError::Msg("保存缓存失败".into());
+                continue;
+            }
+            crate::cache::enforce_limit(&self.cache_dir);
+            return Ok(path);
         }
-        let bytes = resp.bytes().await?;
-        if bytes.len() < 20_000 {
-            return Err(ProviderError::Msg("Audius 音源过小，已跳过".into()));
-        }
-        let tmp = path.with_extension("mp3.part");
-        std::fs::write(&tmp, &bytes).map_err(|e| ProviderError::Msg(e.to_string()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| ProviderError::Msg(e.to_string()))?;
-        crate::cache::enforce_limit(&self.cache_dir);
-        Ok(path)
+        Err(last)
     }
 }
 
@@ -272,15 +356,16 @@ impl MusicProvider for AudiusProvider {
             }
         }
 
-        let remote = self.resolve_stream(track_id).await?;
+        let urls = self.resolve_stream_candidates(track_id).await?;
+        let remote = self.first_reachable(&urls).await?;
 
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let tid = track_id.to_string();
-        let remote_bg = remote.clone();
+        let urls_bg = urls.clone();
         tauri::async_runtime::spawn(async move {
             let p = AudiusProvider { client, cache_dir };
-            let _ = p.download_to_cache(&tid, &remote_bg).await;
+            let _ = p.download_to_cache(&tid, &urls_bg).await;
         });
 
         Ok(PlayUrl {

@@ -39,6 +39,11 @@ export function PlaylistsView({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  /** Inline rename — window.prompt is unavailable in Tauri WebView. */
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  /** Two-step delete confirm — window.confirm also unavailable. */
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const refreshPlaylists = useCallback(async () => {
     const list = await api.listPlaylists();
@@ -69,6 +74,8 @@ export function PlaylistsView({
       setTracks([]);
       return;
     }
+    setRenaming(false);
+    setConfirmDelete(false);
     void loadTracks(activeId).catch((e) => setError(String(e)));
   }, [activeId, loadTracks, refreshToken]);
 
@@ -90,12 +97,23 @@ export function PlaylistsView({
     }
   }
 
-  async function renameActive() {
+  function startRename() {
     if (!activePlaylist) return;
-    const name = window.prompt("重命名歌单", activePlaylist.name)?.trim();
-    if (!name) return;
+    setConfirmDelete(false);
+    setRenameValue(activePlaylist.name);
+    setRenaming(true);
+  }
+
+  async function submitRename() {
+    if (!activePlaylist) return;
+    const name = renameValue.trim();
+    if (!name || name === activePlaylist.name) {
+      setRenaming(false);
+      return;
+    }
     try {
       await api.renamePlaylist(activePlaylist.id, name);
+      setRenaming(false);
       await refreshPlaylists();
     } catch (e) {
       setError(String(e));
@@ -104,9 +122,14 @@ export function PlaylistsView({
 
   async function deleteActive() {
     if (!activePlaylist) return;
-    if (!window.confirm(`删除歌单「${activePlaylist.name}」？`)) return;
+    if (!confirmDelete) {
+      setRenaming(false);
+      setConfirmDelete(true);
+      return;
+    }
     try {
       await api.deletePlaylist(activePlaylist.id);
+      setConfirmDelete(false);
       const list = await refreshPlaylists();
       setActiveId(list[0]?.id ?? null);
     } catch (e) {
@@ -216,27 +239,76 @@ export function PlaylistsView({
           {activePlaylist ? (
             <>
               <div className="playlist-main-head">
-                <div>
-                  <h2>{activePlaylist.name}</h2>
-                  <p>{tracks.length} 首</p>
+                <div className="playlist-main-title">
+                  {renaming ? (
+                    <form
+                      className="playlist-create playlist-rename"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void submitRename();
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setRenaming(false);
+                        }}
+                        placeholder="歌单名称"
+                        aria-label="歌单名称"
+                      />
+                      <button type="submit" className="ghost-btn">
+                        保存
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => setRenaming(false)}
+                      >
+                        取消
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <h2>{activePlaylist.name}</h2>
+                      <p>{tracks.length} 首</p>
+                    </>
+                  )}
+                  {confirmDelete ? (
+                    <p className="playlist-delete-hint">
+                      确认删除「{activePlaylist.name}」？此操作不可恢复。
+                    </p>
+                  ) : null}
                 </div>
                 <div className="playlist-main-actions">
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => void renameActive()}
-                  >
-                    <Pencil size={14} />
-                    重命名
-                  </button>
+                  {!renaming ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      onClick={startRename}
+                    >
+                      <Pencil size={14} />
+                      重命名
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="ghost-btn danger"
                     onClick={() => void deleteActive()}
                   >
                     <Trash2 size={14} />
-                    删除
+                    {confirmDelete ? "确认删除" : "删除"}
                   </button>
+                  {confirmDelete ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      取消
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <SongList

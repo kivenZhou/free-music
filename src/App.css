@@ -269,18 +269,66 @@ button {
 .source-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 2px;
   width: 100%;
   border: 0;
   background: transparent;
   color: var(--text-soft);
-  padding: 9px 12px;
+  padding: 2px 4px 2px 2px;
   border-radius: var(--radius);
   text-align: left;
   font-size: 0.9rem;
   font-weight: 600;
   position: relative;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.source-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0.55;
+}
+
+.source-grip:hover {
+  color: var(--text-soft);
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.source-grip:active {
+  cursor: grabbing;
+}
+
+.source-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 7px 10px 7px 6px;
+  border-radius: var(--radius);
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.source-pick:hover {
+  color: var(--text);
 }
 
 .source-btn-dot {
@@ -293,8 +341,8 @@ button {
 }
 
 .source-btn:hover {
-  color: var(--text);
   background: var(--bg-row-hover);
+  color: var(--text);
 }
 
 .source-btn.on {
@@ -306,6 +354,30 @@ button {
 .source-btn.on .source-btn-dot {
   background: var(--accent);
   box-shadow: 0 0 0 3px rgba(232, 168, 74, 0.18);
+}
+
+.source-btn.dragging {
+  opacity: 0.55;
+  background: var(--bg-row-active);
+}
+
+.source-btn.drag-over {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* While reordering sources, don't flash hover on nav above. */
+.sidebar.is-sorting-sources .nav-item {
+  pointer-events: none;
+}
+
+.sidebar.is-sorting-sources .nav-item:hover {
+  color: var(--text-soft);
+  background: transparent;
+}
+
+.sidebar.is-sorting-sources .nav-item.on:hover {
+  color: var(--text);
+  background: var(--accent-soft);
 }
 
 /* ─── Main ──────────────────────────────────────────── */
@@ -325,7 +397,8 @@ button {
 }
 
 .view-pane.on {
-  display: block;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -398,7 +471,8 @@ button {
 }
 
 .settings-panel {
-  max-width: 640px;
+  width: 100%;
+  max-width: 1100px;
 }
 
 .settings-block {
@@ -612,11 +686,22 @@ button {
 
 /* ─── Playlists ─────────────────────────────────────── */
 
+.playlists-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1100px;
+}
+
 .playlists-layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 20px;
-  min-height: 360px;
+  align-items: stretch;
 }
 
 .playlist-rail {
@@ -625,6 +710,7 @@ button {
   background: rgba(255, 255, 255, 0.02);
   padding: 12px;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -637,6 +723,7 @@ button {
   color: var(--text-soft);
   font-size: 0.82rem;
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .playlist-rail-empty {
@@ -652,7 +739,16 @@ button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+}
+
+.playlist-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .playlist-rail-item {
@@ -716,6 +812,11 @@ button {
   margin-bottom: 14px;
 }
 
+.playlist-main-title {
+  min-width: 0;
+  flex: 1;
+}
+
 .playlist-main-head h2 {
   margin: 0;
   font-size: 1.25rem;
@@ -728,9 +829,21 @@ button {
   font-size: 0.82rem;
 }
 
+.playlist-rename {
+  margin-top: 2px;
+}
+
+.playlist-delete-hint {
+  margin: 8px 0 0 !important;
+  color: var(--danger) !important;
+  font-size: 0.8rem !important;
+}
+
 .playlist-main-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  justify-content: flex-end;
 }
 
 .ghost-btn.danger {
@@ -836,6 +949,11 @@ button {
 @media (max-width: 960px) {
   .playlists-layout {
     grid-template-columns: 1fr;
+  }
+
+  .playlist-rail {
+    height: auto;
+    max-height: 260px;
   }
 }
 
