@@ -53,14 +53,6 @@ function trackKey(t: Track) {
   return `${t.provider}:${t.id}`;
 }
 
-/** Charts share one pane scroller; always use `.view-pane.on`. */
-function getScrollParent(el: HTMLElement | null): HTMLElement | null {
-  return (
-    (el?.closest(".view-pane") as HTMLElement | null) ??
-    (document.querySelector(".view-pane.on") as HTMLElement | null)
-  );
-}
-
 export function ChartsView({
   providerId,
   favoriteKeys,
@@ -89,7 +81,7 @@ export function ChartsView({
   const hasMoreRef = useRef(false);
   const activeRef = useRef<string | null>(null);
   const chartsRef = useRef<Chart[]>([]);
-  const panelRef = useRef<HTMLElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollRef = useRef<number | null>(null);
   const providerIdRef = useRef(providerId);
 
@@ -110,8 +102,7 @@ export function ChartsView({
   }, [providerId]);
 
   const readScrollTop = useCallback(() => {
-    const scroller = getScrollParent(panelRef.current);
-    return scroller?.scrollTop ?? 0;
+    return scrollRef.current?.scrollTop ?? 0;
   }, []);
 
   const persistCurrent = useCallback(() => {
@@ -264,9 +255,9 @@ export function ChartsView({
     };
   }, [providerId, persistCurrent]);
 
-  // Keep scrollTop fresh while the user scrolls this pane.
+  // Keep scrollTop fresh while the user scrolls the list body.
   useEffect(() => {
-    const scroller = getScrollParent(panelRef.current);
+    const scroller = scrollRef.current;
     if (!scroller) return;
 
     const onScroll = () => {
@@ -291,7 +282,7 @@ export function ChartsView({
     if (pendingScrollRef.current == null) return;
     const top = pendingScrollRef.current;
     pendingScrollRef.current = null;
-    const scroller = getScrollParent(panelRef.current);
+    const scroller = scrollRef.current;
     if (!scroller) return;
     scroller.scrollTop = top;
     // Second frame: list height may settle after layout.
@@ -448,7 +439,7 @@ export function ChartsView({
   const showList = !loading || tracks.length > 0;
 
   return (
-    <section className="panel" ref={panelRef}>
+    <section className="panel">
       <header className="panel-head row">
         <div>
           <p className="eyebrow">Charts · {providerLabel(providerId)}</p>
@@ -505,41 +496,43 @@ export function ChartsView({
         </div>
       ) : null}
 
-      {error ? <div className="error-banner">{error}</div> : null}
-      {loading && tracks.length === 0 ? (
-        <div className="empty">正在加载可免费完整播放的歌曲…</div>
-      ) : null}
-      {showList && !(loading && tracks.length === 0) ? (
-        <div className={loading ? "list-dim" : undefined}>
-          <SongList
-            tracks={tracks}
-            currentKey={currentKey}
-            playing={playing}
-            favoriteKeys={favoriteKeys}
-            onPlay={onPlay}
-            onTogglePlay={onTogglePlay}
-            onPlayNext={onPlayNext}
-            onAddToQueue={onAddToQueue}
-            onAddToPlaylist={onAddToPlaylist}
-            onToggleFavorite={onToggleFavorite}
-            hideProvider
-          />
-          {hasMore ? (
-            <div className="load-more-wrap">
-              <button
-                type="button"
-                className="ghost-btn load-more-btn"
-                disabled={loadingMore || loading}
-                onClick={() => void loadMore()}
-              >
-                {loadingMore ? "加载中…" : "加载更多"}
-              </button>
-            </div>
-          ) : tracks.length > 0 && !loading ? (
-            <p className="load-more-end">已加载全部</p>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="panel-body" ref={scrollRef}>
+        {error ? <div className="error-banner">{error}</div> : null}
+        {loading && tracks.length === 0 ? (
+          <div className="empty">正在加载可免费完整播放的歌曲…</div>
+        ) : null}
+        {showList && !(loading && tracks.length === 0) ? (
+          <div className={loading ? "list-dim" : undefined}>
+            <SongList
+              tracks={tracks}
+              currentKey={currentKey}
+              playing={playing}
+              favoriteKeys={favoriteKeys}
+              onPlay={onPlay}
+              onTogglePlay={onTogglePlay}
+              onPlayNext={onPlayNext}
+              onAddToQueue={onAddToQueue}
+              onAddToPlaylist={onAddToPlaylist}
+              onToggleFavorite={onToggleFavorite}
+              hideProvider
+            />
+            {hasMore ? (
+              <div className="load-more-wrap">
+                <button
+                  type="button"
+                  className="ghost-btn load-more-btn"
+                  disabled={loadingMore || loading}
+                  onClick={() => void loadMore()}
+                >
+                  {loadingMore ? "加载中…" : "加载更多"}
+                </button>
+              </div>
+            ) : tracks.length > 0 && !loading ? (
+              <p className="load-more-end">已加载全部</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

@@ -165,62 +165,64 @@ export function SearchView({
         </div>
       ) : null}
 
-      {history.length > 0 ? (
-        <div className="history-row">
-          <div className="history-chips">
-            {history.slice(0, 12).map((h) => (
-              <div key={h.id} className="history-chip">
-                <button
-                  type="button"
-                  className="history-chip-main"
-                  onClick={() => {
-                    setQuery(h.query);
-                    void runSearch(h.query);
-                  }}
-                >
-                  {h.query}
-                </button>
-                <button
-                  type="button"
-                  className="history-chip-remove"
-                  aria-label={`删除「${h.query}」`}
-                  onClick={(e) => void removeHistoryItem(e, h.id)}
-                >
-                  <X size={12} strokeWidth={2.5} />
-                </button>
-              </div>
-            ))}
+      <div className="panel-body">
+        {history.length > 0 ? (
+          <div className="history-row">
+            <div className="history-chips">
+              {history.slice(0, 12).map((h) => (
+                <div key={h.id} className="history-chip">
+                  <button
+                    type="button"
+                    className="history-chip-main"
+                    onClick={() => {
+                      setQuery(h.query);
+                      void runSearch(h.query);
+                    }}
+                  >
+                    {h.query}
+                  </button>
+                  <button
+                    type="button"
+                    className="history-chip-remove"
+                    aria-label={`删除「${h.query}」`}
+                    onClick={(e) => void removeHistoryItem(e, h.id)}
+                  >
+                    <X size={12} strokeWidth={2.5} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="ghost-btn history-clear"
+              onClick={() => void clearHistory()}
+            >
+              清空历史
+            </button>
           </div>
-          <button
-            type="button"
-            className="ghost-btn history-clear"
-            onClick={() => void clearHistory()}
-          >
-            清空历史
-          </button>
-        </div>
-      ) : null}
+        ) : null}
 
-      {error ? <div className="error-banner">{error}</div> : null}
-      {loading && tracks.length === 0 ? (
-        <div className="empty">正在并行搜索各音源…</div>
-      ) : null}
-      {searched && !(loading && tracks.length === 0) ? (
-        <div className={loading ? "list-dim" : undefined}>
-          <SongList
-            tracks={tracks}
-            currentKey={currentKey}
-            playing={playing}
-            favoriteKeys={favoriteKeys}
-            onPlay={onPlay}
-            onTogglePlay={onTogglePlay}
-            onPlayNext={onPlayNext}
-            onAddToQueue={onAddToQueue}
-            onAddToPlaylist={onAddToPlaylist}
-            onToggleFavorite={onToggleFavorite}
-          />
-        </div>
-      ) : null}
+        {error ? <div className="error-banner">{error}</div> : null}
+        {loading && tracks.length === 0 ? (
+          <div className="empty">正在并行搜索各音源…</div>
+        ) : null}
+        {searched && !(loading && tracks.length === 0) ? (
+          <div className={loading ? "list-dim" : undefined}>
+            <SongList
+              tracks={tracks}
+              currentKey={currentKey}
+              playing={playing}
+              favoriteKeys={favoriteKeys}
+              onPlay={onPlay}
+              onTogglePlay={onTogglePlay}
+              onPlayNext={onPlayNext}
+              onAddToQueue={onAddToQueue}
+              onAddToPlaylist={onAddToPlaylist}
+              onToggleFavorite={onToggleFavorite}
+            />
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

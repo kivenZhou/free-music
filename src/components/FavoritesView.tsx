@@ -62,19 +62,21 @@ export function FavoritesView({
           </button>
         ) : null}
       </header>
-      {error ? <div className="error-banner">{error}</div> : null}
-      <SongList
-        tracks={tracks}
-        currentKey={currentKey}
-        playing={playing}
-        favoriteKeys={favoriteKeys}
-        onPlay={onPlay}
-        onTogglePlay={onTogglePlay}
-        onPlayNext={onPlayNext}
-        onAddToQueue={onAddToQueue}
-        onAddToPlaylist={onAddToPlaylist}
-        onToggleFavorite={onToggleFavorite}
-      />
+      <div className="panel-body">
+        {error ? <div className="error-banner">{error}</div> : null}
+        <SongList
+          tracks={tracks}
+          currentKey={currentKey}
+          playing={playing}
+          favoriteKeys={favoriteKeys}
+          onPlay={onPlay}
+          onTogglePlay={onTogglePlay}
+          onPlayNext={onPlayNext}
+          onAddToQueue={onAddToQueue}
+          onAddToPlaylist={onAddToPlaylist}
+          onToggleFavorite={onToggleFavorite}
+        />
+      </div>
     </section>
   );
 }

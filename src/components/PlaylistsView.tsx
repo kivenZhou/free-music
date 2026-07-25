@@ -311,19 +311,21 @@ export function PlaylistsView({
                   ) : null}
                 </div>
               </div>
-              <SongList
-                tracks={tracks}
-                currentKey={currentKey}
-                playing={playing}
-                favoriteKeys={favoriteKeys}
-                onPlay={onPlay}
-                onTogglePlay={onTogglePlay}
-                onPlayNext={onPlayNext}
-                onAddToQueue={onAddToQueue}
-                onToggleFavorite={onToggleFavorite}
-                onAddToPlaylist={onAddToPlaylist}
-                onRemoveTrack={(t) => void removeTrack(t)}
-              />
+              <div className="playlist-main-scroll">
+                <SongList
+                  tracks={tracks}
+                  currentKey={currentKey}
+                  playing={playing}
+                  favoriteKeys={favoriteKeys}
+                  onPlay={onPlay}
+                  onTogglePlay={onTogglePlay}
+                  onPlayNext={onPlayNext}
+                  onAddToQueue={onAddToQueue}
+                  onToggleFavorite={onToggleFavorite}
+                  onAddToPlaylist={onAddToPlaylist}
+                  onRemoveTrack={(t) => void removeTrack(t)}
+                />
+              </div>
             </>
           ) : (
             <div className="empty">

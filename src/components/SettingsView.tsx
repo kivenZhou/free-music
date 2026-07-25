@@ -118,7 +118,7 @@ export function SettingsView({
       : null;
 
   return (
-    <section className="panel settings-panel">
+    <section className="panel">
       {toast ? (
         <div className={`app-toast tone-${toast.tone}`} role="status">
           {toast.text}
@@ -131,127 +131,129 @@ export function SettingsView({
         <p>播放偏好、本地缓存与版本更新</p>
       </header>
 
-      <div className="settings-block">
-        <h2>默认音源</h2>
-        <p className="settings-desc">榜单页默认使用的音源（可随时在侧栏切换）</p>
-        <div className="settings-chips">
-          {chartProviders.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={`chip ${providerId === p.id ? "on" : ""}`}
-              onClick={() => onProviderId(p.id)}
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="settings-block">
-        <h2>播放失败时</h2>
-        <p className="settings-desc">无法播放时是否自动跳到下一首（最多连续 3 首）</p>
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={autoSkip}
-            onChange={(e) => onAutoSkip(e.target.checked)}
-          />
-          <span>{autoSkip ? "自动跳过" : "停在当前曲并提示"}</span>
-        </label>
-      </div>
-
-      <div className="settings-block">
-        <h2>音频缓存</h2>
-        <p className="settings-desc">
-          流式开播后会在后台缓存；超过约 2GB 时自动淘汰旧文件
-        </p>
-        <div className="settings-cache-row">
-          <div className="settings-cache-stat">
-            {cache ? (
-              <>
-                <strong>{formatBytes(cache.sizeBytes)}</strong>
-                <span>
-                  {cache.fileCount} 个文件
-                  {cache.path ? ` · ${cache.path}` : ""}
-                </span>
-              </>
-            ) : (
-              <span>读取中…</span>
-            )}
+      <div className="panel-body">
+        <div className="settings-block">
+          <h2>默认音源</h2>
+          <p className="settings-desc">榜单页默认使用的音源（可随时在侧栏切换）</p>
+          <div className="settings-chips">
+            {chartProviders.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`chip ${providerId === p.id ? "on" : ""}`}
+                onClick={() => onProviderId(p.id)}
+              >
+                {p.name}
+              </button>
+            ))}
           </div>
-          <button
-            type="button"
-            className="ghost-btn"
-            disabled={clearing}
-            onClick={() => void onClearCache()}
-          >
-            {clearing ? "清理中…" : "清除缓存"}
-          </button>
         </div>
-      </div>
 
-      <div className="settings-block">
-        <h2>软件更新</h2>
-        <p className="settings-desc">
-          当前版本 <strong>v{version}</strong>
-          。有新版本时可在应用内下载并自动替换，完成后重启。
-        </p>
-        <div className="settings-cache-row">
-          <div className="settings-cache-stat">
-            {installing ? (
-              <span>
-                {pct != null
-                  ? `下载中 ${pct}%（${formatBytes(progress!.downloaded)}）`
-                  : progress
-                    ? `下载中 ${formatBytes(progress.downloaded)}…`
-                    : "正在准备更新…"}
-              </span>
-            ) : found ? (
-              <span>
-                可用版本 <strong>v{found.version}</strong>
-              </span>
-            ) : (
-              <span>发布频道：GitHub Releases</span>
-            )}
-          </div>
-          <div className="settings-update-actions">
+        <div className="settings-block">
+          <h2>播放失败时</h2>
+          <p className="settings-desc">无法播放时是否自动跳到下一首（最多连续 3 首）</p>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={autoSkip}
+              onChange={(e) => onAutoSkip(e.target.checked)}
+            />
+            <span>{autoSkip ? "自动跳过" : "停在当前曲并提示"}</span>
+          </label>
+        </div>
+
+        <div className="settings-block">
+          <h2>音频缓存</h2>
+          <p className="settings-desc">
+            流式开播后会在后台缓存；超过约 2GB 时自动淘汰旧文件
+          </p>
+          <div className="settings-cache-row">
+            <div className="settings-cache-stat">
+              {cache ? (
+                <>
+                  <strong>{formatBytes(cache.sizeBytes)}</strong>
+                  <span>
+                    {cache.fileCount} 个文件
+                    {cache.path ? ` · ${cache.path}` : ""}
+                  </span>
+                </>
+              ) : (
+                <span>读取中…</span>
+              )}
+            </div>
             <button
               type="button"
               className="ghost-btn"
-              disabled={checking || installing}
-              onClick={() => void onCheckUpdate()}
+              disabled={clearing}
+              onClick={() => void onClearCache()}
             >
-              {checking ? "检查中…" : "检查更新"}
+              {clearing ? "清理中…" : "清除缓存"}
             </button>
-            {found ? (
-              <button
-                type="button"
-                className="play-all-btn"
-                disabled={installing}
-                onClick={() => void onInstallUpdate()}
-              >
-                {installing ? "更新中…" : "立即更新"}
-              </button>
-            ) : null}
           </div>
         </div>
-        {installing && pct != null ? (
-          <div className="update-banner-bar settings-update-bar" aria-hidden>
-            <i style={{ width: `${pct}%` }} />
-          </div>
-        ) : null}
-      </div>
 
-      <div className="settings-block muted">
-        <h2>关于</h2>
-        <p className="settings-desc">
-          音栈 YinZhan · 学习与个人使用
-          <br />
-          仅请求各站已开放的免费完整流；不破解会员、不绕过版权保护，也不托管或分发音源文件。与各音源平台无隶属或授权关系，请遵守平台条款与当地法律。
-          <br />
-          关闭窗口会隐藏到菜单栏托盘；托盘图标可重新打开，右键可退出。
-        </p>
+        <div className="settings-block">
+          <h2>软件更新</h2>
+          <p className="settings-desc">
+            当前版本 <strong>v{version}</strong>
+            。有新版本时可在应用内下载并自动替换，完成后重启。
+          </p>
+          <div className="settings-cache-row">
+            <div className="settings-cache-stat">
+              {installing ? (
+                <span>
+                  {pct != null
+                    ? `下载中 ${pct}%（${formatBytes(progress!.downloaded)}）`
+                    : progress
+                      ? `下载中 ${formatBytes(progress.downloaded)}…`
+                      : "正在准备更新…"}
+                </span>
+              ) : found ? (
+                <span>
+                  可用版本 <strong>v{found.version}</strong>
+                </span>
+              ) : (
+                <span>发布频道：GitHub Releases</span>
+              )}
+            </div>
+            <div className="settings-update-actions">
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={checking || installing}
+                onClick={() => void onCheckUpdate()}
+              >
+                {checking ? "检查中…" : "检查更新"}
+              </button>
+              {found ? (
+                <button
+                  type="button"
+                  className="play-all-btn"
+                  disabled={installing}
+                  onClick={() => void onInstallUpdate()}
+                >
+                  {installing ? "更新中…" : "立即更新"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {installing && pct != null ? (
+            <div className="update-banner-bar settings-update-bar" aria-hidden>
+              <i style={{ width: `${pct}%` }} />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="settings-block muted">
+          <h2>关于</h2>
+          <p className="settings-desc">
+            音栈 YinZhan · 学习与个人使用
+            <br />
+            仅请求各站已开放的免费完整流；不破解会员、不绕过版权保护，也不托管或分发音源文件。与各音源平台无隶属或授权关系，请遵守平台条款与当地法律。
+            <br />
+            关闭窗口会隐藏到菜单栏托盘；托盘图标可重新打开，右键可退出。
+          </p>
+        </div>
       </div>
     </section>
   );

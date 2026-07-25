@@ -78,9 +78,10 @@ function readStoredVolume(): number {
 }
 
 function readStoredRepeat(): RepeatMode {
-  const raw = localStorage.getItem("yinzhan-repeat");
+  // v2: default list-loop (was "off", which auto-persisted on first launch).
+  const raw = localStorage.getItem("yinzhan-repeat-v2");
   if (raw === "all" || raw === "one" || raw === "off") return raw;
-  return "off";
+  return "all";
 }
 
 function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
@@ -189,7 +190,7 @@ function App() {
   const queueRef = useRef<Track[]>(storedQueue?.tracks ?? []);
   const queueIndexRef = useRef(storedQueue?.index ?? -1);
   const shuffleRef = useRef(false);
-  const repeatRef = useRef<RepeatMode>("off");
+  const repeatRef = useRef<RepeatMode>(readStoredRepeat());
   const playGenRef = useRef(0);
   const failSkipRef = useRef(0);
   const autoSkipRef = useRef(true);
@@ -331,7 +332,7 @@ function App() {
   }, [shuffle]);
 
   useEffect(() => {
-    localStorage.setItem("yinzhan-repeat", repeatMode);
+    localStorage.setItem("yinzhan-repeat-v2", repeatMode);
   }, [repeatMode]);
 
   useEffect(() => {
