@@ -94,6 +94,7 @@ pub fn run() {
             commands::resolve_play_url,
             commands::get_search_history,
             commands::clear_search_history,
+            commands::remove_search_history,
             commands::add_favorite,
             commands::remove_favorite,
             commands::list_favorites,

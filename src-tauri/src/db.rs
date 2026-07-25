@@ -123,6 +123,12 @@ impl Database {
         Ok(())
     }
 
+    pub fn remove_search_history(&self, id: i64) -> Result<(), DbError> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute("DELETE FROM search_history WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn add_favorite(&self, track: &Track) -> Result<(), DbError> {
         let now = chrono::Utc::now().to_rfc3339();
         let payload = serde_json::to_string(track)?;

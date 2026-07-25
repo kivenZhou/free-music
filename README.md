@@ -1,6 +1,6 @@
 # 音栈 · YinZhan
 
-桌面端多音源音乐客户端。聚合网易云、哔哩哔哩、酷狗、酷我、YouTube 等平台的**可免费完整播放**曲目，在本地完成榜单浏览、搜索、收藏、歌单与播放，无需登录、无需自建服务端。
+桌面端多音源音乐客户端。聚合网易云、QQ 音乐、哔哩哔哩、酷狗、酷我，以及 **Audius**（开放音源、免登录）等平台的**可免费完整播放**曲目，在本地完成榜单浏览、搜索、收藏、歌单与播放，无需登录、无需自建服务端。
 
 [![Release](https://img.shields.io/github/v/release/kivenZhou/free-music?label=Release)](https://github.com/kivenZhou/free-music/releases)
 [![License](https://img.shields.io/github/license/kivenZhou/free-music)](./LICENSE)
@@ -15,7 +15,7 @@
 | 项目 | 说明 |
 |------|------|
 | 支持平台 | macOS（Intel / Apple Silicon）、Windows x64 |
-| 当前版本 | [v0.1.1](https://github.com/kivenZhou/free-music/releases/tag/v0.1.1) |
+| 当前版本 | [v0.1.2](https://github.com/kivenZhou/free-music/releases/tag/v0.1.2) |
 | 许可证 | [MIT](./LICENSE) |
 | 发行页 | [GitHub Releases](https://github.com/kivenZhou/free-music/releases) |
 
@@ -23,9 +23,31 @@
 
 ---
 
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/charts.png" alt="榜单" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/search.png" alt="搜索" width="360" />
+  &nbsp;
+  <img src="docs/screenshots/playlists.png" alt="歌单" width="360" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="设置" width="720" />
+</p>
+
+| 榜单 | 搜索 | 歌单 | 设置 |
+|------|------|------|------|
+| 多音源分类浏览与播放 | 聚合搜索、按音源筛选 | 本地多歌单管理 | 默认音源、缓存与更新 |
+
+---
+
 ## 功能
 
-- **多音源切换** — 榜单与搜索按音源独立浏览，共用同一播放器
+- **多音源切换** — 榜单与搜索按音源独立浏览，共用同一播放器（含 Audius 开放音源）
 - **完整曲过滤** — 优先展示可完整播放的曲目，减少点播失败
 - **本地媒体库** — 收藏、多歌单、搜索历史、播放队列均持久化在本机
 - **播放体验** — 队列 / 循环 / 随机、歌词、迷你窗、系统媒体键、菜单栏托盘
@@ -34,7 +56,7 @@
 | 模块 | 说明 |
 |------|------|
 | 榜单 | 各音源热歌、新歌等分类；支持分页加载 |
-| 搜索 | 可按音源筛选；历史本地保存 |
+| 搜索 | 可按音源筛选；搜索历史保存在搜索页，可单条或批量清除 |
 | 收藏 / 歌单 | 多歌单管理，曲目可加入指定歌单 |
 | 播放 | 应用内播放；部分音源支持流式开播与后台缓存 |
 | 歌词 | 网易云提供 LRC；其它音源按歌名、歌手匹配 |
@@ -160,7 +182,7 @@ npm run tauri build
    音栈不拥有、不托管、不分发音乐作品。播放地址来自第三方平台当时可访问的公开接口或页面能力；著作权及其他权利仍归原权利人及平台所有。本项目**不提供**破解会员、绕过 DRM / 版权保护、批量镜像曲库或其他违法用途。
 
 3. **平台关系**  
-   本项目为独立开源作品，与网易云、哔哩哔哩、酷狗、酷我、YouTube 等平台**无官方合作、授权或隶属关系**。请遵守各平台服务条款；若平台调整接口、限制访问或要求停止使用某能力，相关功能可能随时失效，届时应停止继续使用该音源。
+   本项目为独立开源作品，与网易云、QQ 音乐、哔哩哔哩、酷狗、酷我、Audius 等平台**无官方合作、授权或隶属关系**。Audius 曲目多为艺人自行上传分发；咪咕、Openverse、Internet Archive、YouTube 等源因接口关闭或国内网络不可达，暂不默认接入。请遵守各平台服务条款；若平台调整接口、限制访问或要求停止使用某能力，相关功能可能随时失效，届时应停止继续使用该音源。
 
 4. **可用性**  
    第三方接口可能变更、限流或失效；榜单为空、无法播放、缓存异常等情况属预期风险。本地音频缓存仅便于个人回放，可随时在设置中清除，不应被理解为可再分发的曲库。

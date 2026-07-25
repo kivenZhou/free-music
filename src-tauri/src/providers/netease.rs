@@ -5,16 +5,6 @@ use reqwest::header::{HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde_json::Value;
 use std::path::PathBuf;
 
-
-const FALLBACK_CHARTS: &[(&str, &str, &str, &str)] = &[
-    ("3778678", "热歌榜", "cn", "网易云音乐热歌榜"),
-    ("3779629", "新歌榜", "cn", "华语/流行新歌"),
-    ("19723756", "飙升榜", "cn", "近期飙升曲目"),
-    ("2884035", "原创榜", "cn", "原创音乐榜"),
-    ("745956260", "韩语榜", "kr", "韩国流行"),
-    ("5059661515", "日语榜", "jp", "日本流行"),
-];
-
 fn https_url(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("http://") {
         format!("https://{rest}")
@@ -439,45 +429,24 @@ impl MusicProvider for NeteaseProvider {
     }
 
     async fn charts(&self) -> Result<Vec<Chart>, ProviderError> {
-        let url = "https://music.163.com/api/toplist";
-        // Official core boards only — avoid matching every "*热歌榜*" / "*日本*" variant.
-        const OFFICIAL: &[(&str, &str, &str, &str)] = &[
+        // Official boards + curated genre playlists (粤语 / 怀旧 / 韩日语等).
+        // Curated playlist IDs are not always present in /api/toplist — always expose them.
+        const CHARTS: &[(&str, &str, &str, &str)] = &[
             ("3778678", "热歌榜", "cn", "网易云音乐热歌榜"),
             ("3779629", "新歌榜", "cn", "华语/流行新歌"),
             ("19723756", "飙升榜", "cn", "近期飙升曲目"),
             ("2884035", "原创榜", "cn", "原创音乐榜"),
+            ("8577528546", "粤语金曲", "hk", "粤语流行精选"),
+            ("825521241", "粤语怀旧", "hk", "七八十年代粤语经典"),
+            ("2168337803", "80年代经典", "cn", "八十年代华语怀旧"),
+            ("7438859223", "8090经典", "cn", "八九十年代流行金曲"),
             ("745956260", "韩语榜", "kr", "韩国流行"),
-            ("5059661515", "日语榜", "jp", "日本流行"),
+            ("5059644681", "日语榜", "jp", "日本流行"),
+            ("60131", "日本Oricon", "jp", "Oricon 周榜向"),
+            ("2809513713", "欧美热歌", "us", "欧美热门流行"),
         ];
 
-        if let Ok(resp) = self.client.get(url).send().await {
-            if let Ok(json) = resp.json::<Value>().await {
-                if let Some(list) = json.get("list").and_then(|v| v.as_array()) {
-                    let mut charts = Vec::new();
-                    for (id, name, region, desc) in OFFICIAL {
-                        let exists = list.iter().any(|item| {
-                            item.get("id")
-                                .and_then(|v| v.as_u64())
-                                .map(|n| n.to_string() == *id)
-                                .unwrap_or(false)
-                        });
-                        if exists {
-                            charts.push(Chart {
-                                id: (*id).into(),
-                                name: (*name).into(),
-                                region: (*region).into(),
-                                description: (*desc).into(),
-                            });
-                        }
-                    }
-                    if !charts.is_empty() {
-                        return Ok(charts);
-                    }
-                }
-            }
-        }
-
-        Ok(FALLBACK_CHARTS
+        Ok(CHARTS
             .iter()
             .map(|(id, name, region, desc)| Chart {
                 id: (*id).into(),

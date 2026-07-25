@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Play } from "lucide-react";
+import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
+import { Play, X } from "lucide-react";
 import { api, providerLabel } from "../api";
 import type { ProviderInfo, SearchHistoryItem, Track } from "../types";
 import { SongList } from "./SongList";
@@ -42,7 +42,7 @@ export function SearchView({
   const [providerFilter, setProviderFilter] = useState("all");
 
   const refreshHistory = () => {
-    api.getSearchHistory().then(setHistory).catch(() => undefined);
+    api.getSearchHistory(20).then(setHistory).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -86,7 +86,27 @@ export function SearchView({
     }
   }
 
-  const searchableProviders = providers.filter((p) => p.id !== "youtube");
+  async function clearHistory() {
+    try {
+      await api.clearSearchHistory();
+      setHistory([]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function removeHistoryItem(e: MouseEvent, id: number) {
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      await api.removeSearchHistory(id);
+      setHistory((prev) => prev.filter((h) => h.id !== id));
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  const searchableProviders = providers;
 
   return (
     <section className="panel">
@@ -96,7 +116,7 @@ export function SearchView({
           <h1>搜索</h1>
           <p>
             {providerFilter === "all"
-              ? "并行聚合 B站 / 网易云 / 酷狗 / 酷我 · 仅免费完整曲"
+              ? "并行聚合多音源 · 仅免费完整曲"
               : `仅搜 ${providerLabel(providerFilter)} · 仅免费完整曲`}
           </p>
         </div>
@@ -146,20 +166,38 @@ export function SearchView({
       ) : null}
 
       {history.length > 0 ? (
-        <div className="history-chips">
-          {history.slice(0, 8).map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              className="chip"
-              onClick={() => {
-                setQuery(h.query);
-                void runSearch(h.query);
-              }}
-            >
-              {h.query}
-            </button>
-          ))}
+        <div className="history-row">
+          <div className="history-chips">
+            {history.slice(0, 12).map((h) => (
+              <div key={h.id} className="history-chip">
+                <button
+                  type="button"
+                  className="history-chip-main"
+                  onClick={() => {
+                    setQuery(h.query);
+                    void runSearch(h.query);
+                  }}
+                >
+                  {h.query}
+                </button>
+                <button
+                  type="button"
+                  className="history-chip-remove"
+                  aria-label={`删除「${h.query}」`}
+                  onClick={(e) => void removeHistoryItem(e, h.id)}
+                >
+                  <X size={12} strokeWidth={2.5} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="ghost-btn history-clear"
+            onClick={() => void clearHistory()}
+          >
+            清空历史
+          </button>
         </div>
       ) : null}
 

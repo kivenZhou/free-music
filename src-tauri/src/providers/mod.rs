@@ -1,14 +1,16 @@
+mod audius;
 mod bilibili;
 mod kugou;
 mod kuwo;
 mod netease;
-mod youtube;
+mod qq;
 
+pub use audius::AudiusProvider;
 pub use bilibili::BilibiliProvider;
 pub use kugou::KugouProvider;
 pub use kuwo::KuwoProvider;
 pub use netease::NeteaseProvider;
-pub use youtube::YoutubeProvider;
+pub use qq::QqProvider;
 
 use crate::models::{Chart, PlayUrl, Track};
 use async_trait::async_trait;
@@ -99,11 +101,14 @@ impl ProviderRegistry {
             providers: vec![
                 // Default / primary: 网易云 (matches UI + README)
                 Box::new(NeteaseProvider::new(audio.join("netease"))),
+                Box::new(QqProvider::new(audio.join("qq"))),
                 Box::new(BilibiliProvider::new(audio.join("bilibili"))),
                 Box::new(KugouProvider::new(audio.join("kugou"))),
                 Box::new(KuwoProvider::new(audio.join("kuwo"))),
                 // 咪咕：公开搜索可用，但免费播放地址接口已关闭，暂不接入
-                Box::new(YoutubeProvider::new(audio.join("youtube"))),
+                // Audius：免登录开放音源，国内通常可直连
+                // Openverse / Archive.org / YouTube：国内多数网络不通，不默认接入
+                Box::new(AudiusProvider::new(audio.join("audius"))),
             ],
         }
     }
@@ -127,16 +132,8 @@ impl ProviderRegistry {
     }
 
     pub async fn search_all(&self, query: &str, limit: u32) -> Vec<Track> {
-        let want_youtube =
-            query.contains("youtube.com") || query.contains("youtu.be") || query.contains("yt:");
-
-        // YouTube is much slower — only include when the query looks like a YT link/keyword.
-        let active: Vec<&dyn MusicProvider> = self
-            .providers
-            .iter()
-            .map(|p| p.as_ref())
-            .filter(|p| want_youtube || p.id() != "youtube")
-            .collect();
+        let active: Vec<&dyn MusicProvider> =
+            self.providers.iter().map(|p| p.as_ref()).collect();
 
         let n = active.len().max(1);
         let per = ((limit as usize) / n).max(8).min(16) as u32;
@@ -184,9 +181,6 @@ impl ProviderRegistry {
             };
             for p in &self.providers {
                 if p.id() == provider {
-                    continue;
-                }
-                if p.id() == "youtube" {
                     continue;
                 }
                 if let Ok(tracks) = p.search(&q, 5).await {

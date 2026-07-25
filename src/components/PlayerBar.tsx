@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { RepeatMode, Track } from "../types";
 import { providerLabel } from "../api";
 import {
@@ -54,26 +54,44 @@ interface Props {
 
 function fmt(sec: number) {
   if (!Number.isFinite(sec) || sec < 0) return "0:00";
-  const s = Math.floor(sec);
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r.toString().padStart(2, "0")}`;
+  const total = Math.floor(sec);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function PlayerCover({ url }: { url?: string | null }) {
+function PlayerCover({
+  url,
+  playing,
+}: {
+  url?: string | null;
+  playing: boolean;
+}) {
   const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    setBroken(false);
+  }, [url]);
+
+  const spinClass = playing ? "is-playing" : "";
+
   if (!url || broken) {
     return (
-      <div className="player-cover placeholder">
+      <div className={`player-cover placeholder ${spinClass}`}>
         <Music2 size={18} strokeWidth={1.5} />
       </div>
     );
   }
   return (
     <img
-      className="player-cover"
+      className={`player-cover ${spinClass}`}
       src={url}
       alt=""
+      referrerPolicy="no-referrer"
       onError={() => setBroken(true)}
     />
   );
@@ -122,7 +140,7 @@ export function PlayerBar({
   return (
     <footer className="player">
       <div className="player-track">
-        <PlayerCover url={track?.coverUrl} />
+        <PlayerCover url={track?.coverUrl} playing={playing && !loading} />
         <div className="player-meta">
           <div className="player-title">{track?.title ?? "尚未播放"}</div>
           <div className="player-artist">

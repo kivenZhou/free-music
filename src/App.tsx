@@ -6,7 +6,6 @@ import { api, providerLabel } from "./api";
 import { BrandMark } from "./components/BrandMark";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
-import { HistoryView } from "./components/HistoryView";
 import { LyricsPanel, mergeLyrics, type LyricLine } from "./components/LyricsPanel";
 import { PlayerBar } from "./components/PlayerBar";
 import { PlaylistPicker } from "./components/PlaylistPicker";
@@ -15,18 +14,44 @@ import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { TrendingUp, Search, Heart, History, Settings, ListMusic } from "lucide-react";
+import { TrendingUp, Search, Heart, Settings, ListMusic, GripVertical } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import { checkForInstallableUpdate } from "./updater";
 import "./App.css";
 
 const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
+const PROVIDER_ORDER_KEY = "yinzhan-provider-order";
 const NORMAL_MIN = { width: 900, height: 600 };
 const MINI_SIZE = { width: 480, height: 96 };
 
 function favKey(t: Track) {
   return `${t.provider}:${t.id}`;
+}
+
+function loadProviderOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(PROVIDER_ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string");
+  } catch {
+    return [];
+  }
+}
+
+function sortProvidersByOrder(
+  list: ProviderInfo[],
+  order: string[],
+): ProviderInfo[] {
+  if (order.length === 0) return list;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return [...list].sort((a, b) => {
+    const ai = rank.has(a.id) ? (rank.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
+    const bi = rank.has(b.id) ? (rank.get(b.id) as number) : Number.MAX_SAFE_INTEGER;
+    return ai - bi;
+  });
 }
 
 function loadStoredQueue(): { tracks: Track[]; index: number } | null {
@@ -69,6 +94,41 @@ function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
   return [preferred, ...rest];
 }
 
+/** Prefer the media element's real duration; metadata can be wrong (esp. Bilibili). */
+function playbackDuration(
+  audio: HTMLAudioElement | null | undefined,
+  fallbackMs?: number | null,
+): number {
+  if (audio) {
+    const d = audio.duration;
+    if (Number.isFinite(d) && d > 0) return d;
+    if (audio.seekable.length > 0) {
+      const end = audio.seekable.end(audio.seekable.length - 1);
+      if (Number.isFinite(end) && end > 0) return end;
+    }
+  }
+  if (fallbackMs != null && Number.isFinite(fallbackMs) && fallbackMs > 0) {
+    return fallbackMs / 1000;
+  }
+  return 0;
+}
+
+function clampSeekTime(audio: HTMLAudioElement, sec: number): number {
+  const dur = playbackDuration(audio);
+  let target = Math.max(0, sec);
+  if (dur > 0) {
+    // Stay slightly before the end so we don't fire `ended` and auto-advance.
+    target = Math.min(target, Math.max(0, dur - 0.35));
+  }
+  if (audio.seekable.length > 0) {
+    const end = audio.seekable.end(audio.seekable.length - 1);
+    if (Number.isFinite(end) && end > 0) {
+      target = Math.min(target, Math.max(0, end - 0.35));
+    }
+  }
+  return target;
+}
+
 function App() {
   const storedQueue = useMemo(() => loadStoredQueue(), []);
   const [nav, setNav] = useState<NavKey>("charts");
@@ -80,7 +140,6 @@ function App() {
   const [favToken, setFavToken] = useState(0);
   const [playlistToken, setPlaylistToken] = useState(0);
   const [playlistPickTrack, setPlaylistPickTrack] = useState<Track | null>(null);
-  const [searchSeed, setSearchSeed] = useState("");
 
   const [queue, setQueue] = useState<Track[]>(() => storedQueue?.tracks ?? []);
   const [queueIndex, setQueueIndex] = useState(() => storedQueue?.index ?? -1);
@@ -114,6 +173,15 @@ function App() {
     () => localStorage.getItem("yinzhan-auto-skip") !== "0",
   );
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [dragSourceId, setDragSourceId] = useState<string | null>(null);
+  const [dragOverSourceId, setDragOverSourceId] = useState<string | null>(null);
+  const sourceListRef = useRef<HTMLDivElement | null>(null);
+  const sourceDragRef = useRef<{
+    id: string;
+    startY: number;
+    moved: boolean;
+    pointerId: number;
+  } | null>(null);
 
   const queueReadyRef = useRef(false);
 
@@ -125,6 +193,8 @@ function App() {
   const playGenRef = useRef(0);
   const failSkipRef = useRef(0);
   const autoSkipRef = useRef(true);
+  const ignoreEndedUntilRef = useRef(0);
+  const suppressTimeRef = useRef(false);
   const normalSizeRef = useRef({ width: 1180, height: 760 });
   const playTrackAtRef = useRef<(tracks: Track[], index: number) => void>(() => undefined);
   const advanceRef = useRef<(dir: 1 | -1, opts?: { fromEnded?: boolean }) => void>(
@@ -204,12 +274,13 @@ function App() {
 
   useEffect(() => {
     api.listProviders().then((ps) => {
-      setProviders(ps);
+      const ordered = sortProvidersByOrder(ps, loadProviderOrder());
+      setProviders(ordered);
       const saved = localStorage.getItem("yinzhan-provider");
-      if (saved && ps.some((p) => p.id === saved)) {
+      if (saved && ordered.some((p) => p.id === saved)) {
         setProviderId(saved);
-      } else if (ps[0]) {
-        setProviderId(ps[0].id);
+      } else if (ordered[0]) {
+        setProviderId(ordered[0].id);
       }
     });
     refreshFavorites().catch(() => undefined);
@@ -218,6 +289,42 @@ function App() {
   useEffect(() => {
     localStorage.setItem("yinzhan-provider", providerId);
   }, [providerId]);
+
+  const reorderProviders = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setProviders((prev) => {
+      const from = prev.findIndex((p) => p.id === fromId);
+      const to = prev.findIndex((p) => p.id === toId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      localStorage.setItem(
+        PROVIDER_ORDER_KEY,
+        JSON.stringify(next.map((p) => p.id)),
+      );
+      return next;
+    });
+  }, []);
+
+  const hitSourceAtY = useCallback((clientY: number): string | null => {
+    const root = sourceListRef.current;
+    if (!root) return null;
+    const nodes = root.querySelectorAll<HTMLElement>("[data-source-id]");
+    for (const el of nodes) {
+      const rect = el.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        return el.dataset.sourceId || null;
+      }
+    }
+    return null;
+  }, []);
+
+  const endSourceDrag = useCallback(() => {
+    sourceDragRef.current = null;
+    setDragSourceId(null);
+    setDragOverSourceId(null);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("yinzhan-shuffle", shuffle ? "1" : "0");
@@ -288,12 +395,21 @@ function App() {
     queueIndexRef.current = index;
     setCurrent(track);
     setLoadingPlay(true);
+    setPlaying(false);
     setPlayError(null);
+    // Freeze timeupdate + hard-stop previous audio before any long resolve/download.
+    suppressTimeRef.current = true;
     setProgress(0);
-    setDuration(0);
-
+    setDuration(track.durationMs ? track.durationMs / 1000 : 0);
     try {
       audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    } catch {
+      // ignore
+    }
+
+    try {
       const resolved = await api.resolvePlayUrl(track);
       if (gen !== playGenRef.current) return;
       // Prefer disk cache when warm; otherwise stream remote URL immediately.
@@ -307,8 +423,11 @@ function App() {
       await audio.play();
       if (gen !== playGenRef.current) return;
       failSkipRef.current = 0;
+      suppressTimeRef.current = false;
+      setProgress(audio.currentTime || 0);
     } catch (e) {
       if (gen !== playGenRef.current) return;
+      suppressTimeRef.current = false;
       setPlaying(false);
       setPlayError(String(e).replace(/^Error:\s*/, ""));
       const canAdvance = index < tracks.length - 1 || repeatRef.current === "all";
@@ -377,9 +496,23 @@ function App() {
     audio.volume = muted ? 0 : volume;
     audioRef.current = audio;
 
-    const onTime = () => setProgress(audio.currentTime);
-    const onMeta = () => setDuration(audio.duration || 0);
+    const onTime = () => {
+      if (suppressTimeRef.current) return;
+      setProgress(audio.currentTime);
+    };
+    const onMeta = () => {
+      const d = playbackDuration(audio);
+      if (d > 0) setDuration(d);
+    };
+    const onDuration = () => {
+      const d = playbackDuration(audio);
+      if (d > 0) setDuration(d);
+    };
     const onEnded = () => {
+      // Seeking past a wrong metadata end used to fire `ended` and skip tracks.
+      if (Date.now() < ignoreEndedUntilRef.current) return;
+      const dur = playbackDuration(audio);
+      if (dur > 0 && audio.currentTime < dur - 1.5) return;
       setPlaying(false);
       advanceRef.current(1, { fromEnded: true });
     };
@@ -408,6 +541,7 @@ function App() {
 
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
+    audio.addEventListener("durationchange", onDuration);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
@@ -417,6 +551,7 @@ function App() {
       audio.pause();
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("loadedmetadata", onMeta);
+      audio.removeEventListener("durationchange", onDuration);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
@@ -567,12 +702,16 @@ function App() {
     (ratio: number) => {
       const audio = audioRef.current;
       if (!audio) return;
-      const effectiveDur = current?.durationMs
-        ? current.durationMs / 1000
-        : audio.duration;
-      if (!Number.isFinite(effectiveDur)) return;
-      audio.currentTime = effectiveDur * ratio;
-      setProgress(audio.currentTime);
+      const dur = playbackDuration(audio, current?.durationMs);
+      if (dur <= 0) return;
+      const target = clampSeekTime(audio, dur * Math.min(1, Math.max(0, ratio)));
+      ignoreEndedUntilRef.current = Date.now() + 800;
+      try {
+        audio.currentTime = target;
+        setProgress(target);
+      } catch {
+        // Some streams reject seeks; don't advance the queue.
+      }
     },
     [current],
   );
@@ -580,8 +719,14 @@ function App() {
   const seekToSeconds = useCallback((sec: number) => {
     const audio = audioRef.current;
     if (!audio) return;
-    audio.currentTime = Math.max(0, sec);
-    setProgress(audio.currentTime);
+    const target = clampSeekTime(audio, sec);
+    ignoreEndedUntilRef.current = Date.now() + 800;
+    try {
+      audio.currentTime = target;
+      setProgress(target);
+    } catch {
+      // ignore
+    }
   }, []);
 
   const toggleMini = useCallback(async () => {
@@ -654,11 +799,6 @@ function App() {
 
   const toggleMute = useCallback(() => {
     setMuted((m) => !m);
-  }, []);
-
-  const goSearch = useCallback((q: string) => {
-    setSearchSeed(q);
-    setNav("search");
   }, []);
 
   useEffect(() => {
@@ -751,8 +891,10 @@ function App() {
     setHandler("seekto", (details) => {
       const audio = audioRef.current;
       if (!audio || details.seekTime == null) return;
-      audio.currentTime = details.seekTime;
-      setProgress(details.seekTime);
+      const target = clampSeekTime(audio, details.seekTime);
+      ignoreEndedUntilRef.current = Date.now() + 800;
+      audio.currentTime = target;
+      setProgress(target);
     });
 
     return () => {
@@ -771,7 +913,6 @@ function App() {
         { key: "search" as const, label: "搜索", en: "Search", icon: Search },
         { key: "favorites" as const, label: "收藏", en: "Saved", icon: Heart },
         { key: "playlists" as const, label: "歌单", en: "Lists", icon: ListMusic },
-        { key: "history" as const, label: "历史", en: "History", icon: History },
         { key: "settings" as const, label: "设置", en: "Prefs", icon: Settings },
       ] as const,
     [],
@@ -781,7 +922,7 @@ function App() {
     <div className={`app ${mini ? "mini" : ""}`}>
       {!mini ? (
         <>
-      <aside className="sidebar">
+      <aside className={`sidebar ${dragSourceId ? "is-sorting-sources" : ""}`}>
         <div className="brand">
           <BrandMark className="brand-mark" size={42} />
           <div className="brand-text">
@@ -817,17 +958,89 @@ function App() {
                 <span className="source-label-zh">音源</span>
                 <span className="source-label-en">Source</span>
               </div>
-              <div className="source-list">
+              <div
+                className="source-list"
+                role="list"
+                ref={sourceListRef}
+              >
                 {providers.map((p) => (
-                  <button
+                  <div
                     key={p.id}
-                    type="button"
-                    className={`source-btn ${providerId === p.id ? "on" : ""}`}
-                    onClick={() => setProviderId(p.id)}
+                    role="listitem"
+                    data-source-id={p.id}
+                    className={[
+                      "source-btn",
+                      providerId === p.id ? "on" : "",
+                      dragSourceId === p.id ? "dragging" : "",
+                      dragOverSourceId === p.id && dragSourceId !== p.id
+                        ? "drag-over"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                   >
-                    <span className="source-btn-dot" aria-hidden />
-                    {providerLabel(p.id)}
-                  </button>
+                    <button
+                      type="button"
+                      className="source-grip"
+                      title="拖动排序"
+                      aria-label={`拖动调整 ${providerLabel(p.id)} 顺序`}
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        (e.currentTarget as HTMLElement).setPointerCapture(
+                          e.pointerId,
+                        );
+                        sourceDragRef.current = {
+                          id: p.id,
+                          startY: e.clientY,
+                          moved: false,
+                          pointerId: e.pointerId,
+                        };
+                        setDragSourceId(p.id);
+                        setDragOverSourceId(null);
+                      }}
+                      onPointerMove={(e) => {
+                        const drag = sourceDragRef.current;
+                        if (!drag || drag.pointerId !== e.pointerId) return;
+                        if (Math.abs(e.clientY - drag.startY) > 4) {
+                          drag.moved = true;
+                        }
+                        if (!drag.moved) return;
+                        const over = hitSourceAtY(e.clientY);
+                        setDragOverSourceId(
+                          over && over !== drag.id ? over : null,
+                        );
+                      }}
+                      onPointerUp={(e) => {
+                        const drag = sourceDragRef.current;
+                        if (!drag || drag.pointerId !== e.pointerId) return;
+                        try {
+                          (e.currentTarget as HTMLElement).releasePointerCapture(
+                            e.pointerId,
+                          );
+                        } catch {
+                          /* already released */
+                        }
+                        const over = drag.moved ? hitSourceAtY(e.clientY) : null;
+                        if (over && over !== drag.id) {
+                          reorderProviders(drag.id, over);
+                        }
+                        endSourceDrag();
+                      }}
+                      onPointerCancel={() => endSourceDrag()}
+                    >
+                      <GripVertical size={14} strokeWidth={2} />
+                    </button>
+                    <button
+                      type="button"
+                      className="source-pick"
+                      onClick={() => setProviderId(p.id)}
+                    >
+                      <span className="source-btn-dot" aria-hidden />
+                      {providerLabel(p.id)}
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -870,7 +1083,6 @@ function App() {
             onAddToQueue={addToQueue}
             onAddToPlaylist={setPlaylistPickTrack}
             onToggleFavorite={toggleFavorite}
-            initialQuery={searchSeed}
           />
         </div>
         <div className={`view-pane ${nav === "favorites" ? "on" : ""}`}>
@@ -903,9 +1115,6 @@ function App() {
             refreshToken={playlistToken}
             active={nav === "playlists"}
           />
-        </div>
-        <div className={`view-pane ${nav === "history" ? "on" : ""}`}>
-          <HistoryView onSearch={goSearch} active={nav === "history"} />
         </div>
         <div className={`view-pane ${nav === "settings" ? "on" : ""}`}>
           <SettingsView
@@ -959,7 +1168,13 @@ function App() {
         loading={loadingPlay}
         error={playError}
         progress={progress}
-        duration={current?.durationMs ? current.durationMs / 1000 : duration}
+        duration={
+          Number.isFinite(duration) && duration > 0
+            ? duration
+            : current?.durationMs
+              ? current.durationMs / 1000
+              : 0
+        }
         hasPrev={hasPrev}
         hasNext={hasNext}
         favorited={currentKey ? favoriteKeys.has(currentKey) : false}
