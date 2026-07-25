@@ -23,6 +23,28 @@
 
 ---
 
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/charts.png" alt="榜单" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/search.png" alt="搜索" width="360" />
+  &nbsp;
+  <img src="docs/screenshots/playlists.png" alt="歌单" width="360" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="设置" width="720" />
+</p>
+
+| 榜单 | 搜索 | 歌单 | 设置 |
+|------|------|------|------|
+| 多音源分类浏览与播放 | 聚合搜索、按音源筛选 | 本地多歌单管理 | 默认音源、缓存与更新 |
+
+---
+
 ## 功能
 
 - **多音源切换** — 榜单与搜索按音源独立浏览，共用同一播放器（含 Audius 开放音源）
