@@ -15,7 +15,7 @@
 | 项目 | 说明 |
 |------|------|
 | 支持平台 | macOS（Intel / Apple Silicon）、Windows x64 |
-| 当前版本 | [v0.1.2](https://github.com/kivenZhou/free-music/releases/tag/v0.1.2) |
+| 当前版本 | [v0.2.0](https://github.com/kivenZhou/free-music/releases/tag/v0.2.0) |
 | 许可证 | [MIT](./LICENSE) |
 | 发行页 | [GitHub Releases](https://github.com/kivenZhou/free-music/releases) |
 
@@ -41,7 +41,7 @@
 
 | 榜单 | 搜索 | 歌单 | 设置 |
 |------|------|------|------|
-| 多音源分类浏览与播放 | 聚合搜索、按音源筛选 | 本地多歌单管理 | 默认音源、缓存与更新 |
+| 多音源分类浏览与播放 | 聚合搜索、按音源筛选 | 本地多歌单管理 | 默认音源、语音助手、缓存与更新 |
 
 ---
 
@@ -51,6 +51,7 @@
 - **完整曲过滤** — 优先展示可完整播放的曲目，减少点播失败
 - **本地媒体库** — 收藏、多歌单、搜索历史、播放队列均持久化在本机
 - **播放体验** — 队列 / 循环 / 随机、歌词、迷你窗、系统媒体键、菜单栏托盘
+- **智能语音助手（macOS）** — 说「小栈小栈」唤醒；播控、点播、歌词、收藏、切源与主题歌单等
 - **轻量架构** — 基于 Tauri 2，相对 Electron 体积与内存占用更小
 
 | 模块 | 说明 |
@@ -60,7 +61,8 @@
 | 收藏 / 歌单 | 多歌单管理，曲目可加入指定歌单 |
 | 播放 | 应用内播放；部分音源支持流式开播与后台缓存 |
 | 歌词 | 本源优先（网易云 / QQ / 酷狗 / 酷我）；否则清洗歌名后跨匹配网易云；再失败用 [LRCLIB](https://lrclib.net) 兜底 |
-| 设置 | 默认音源、自动跳过、缓存清理等 |
+| 语音助手 | macOS 打包版可用；设置中开启。唤醒词「小栈小栈」。点播顺序：播放列表 → 收藏 → 当前默认音源搜索首条；回复优先微软晓晓神经语音 |
+| 设置 | 默认音源、语音助手、自动跳过、缓存清理与软件更新等 |
 
 ---
 
@@ -132,7 +134,7 @@ npm run tauri build -- --target universal-apple-darwin
 npm run tauri build
 ```
 
-推送版本标签（例如 `v0.1.0`）或手动触发 `.github/workflows/release.yml`，可自动构建 macOS / Windows 发行产物。
+推送版本标签（例如 `v0.2.0`）或手动触发 `.github/workflows/release.yml`，可自动构建 macOS / Windows 发行产物。
 
 ### 应用内更新
 
@@ -170,6 +172,7 @@ npm run tauri build
 | 桌面壳 | Tauri 2 |
 | 本地存储 | SQLite |
 | 音源接入 | Rust Provider（可插拔） |
+| 语音（macOS） | SFSpeechRecognizer + 本地意图规则 / 小型 n-gram 模型；TTS 优先 Edge 神经语音 |
 
 ---
 
