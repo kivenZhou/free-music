@@ -48,6 +48,8 @@ export const api = {
       provider: track.provider,
       title: track.title,
       artist: track.artist,
+      album: track.album ?? null,
+      durationMs: track.durationMs ?? null,
     }),
   listPlaylists: () => invoke<Playlist[]>("list_playlists"),
   createPlaylist: (name: string) => invoke<Playlist>("create_playlist", { name }),

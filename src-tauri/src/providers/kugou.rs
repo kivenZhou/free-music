@@ -231,6 +231,114 @@ impl KugouProvider {
         }
         Err(last)
     }
+
+    async fn fetch_lyrics(
+        &self,
+        hash: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        use base64::Engine;
+
+        let mut candidates: Vec<Value> = Vec::new();
+
+        let search_hash = format!(
+            "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash={hash}"
+        );
+        if let Ok(search) = self
+            .client
+            .get(&search_hash)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+        {
+            if let Ok(json) = search.json::<Value>().await {
+                if let Some(arr) = json.get("candidates").and_then(|v| v.as_array()) {
+                    candidates = arr.clone();
+                }
+            }
+        }
+
+        // Hash-only miss: pull title/duration from play info and search by keyword.
+        if candidates.is_empty() {
+            let info_url =
+                format!("http://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash={hash}");
+            if let Ok(info) = self
+                .client
+                .get(&info_url)
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+            {
+                if let Ok(json) = info.json::<Value>().await {
+                    let file_name = json
+                        .get("fileName")
+                        .or_else(|| json.get("songName"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim();
+                    let duration_ms = json
+                        .get("timeLength")
+                        .and_then(|v| v.as_u64())
+                        .map(|s| s.saturating_mul(1000))
+                        .unwrap_or(0);
+                    if !file_name.is_empty() {
+                        let mut url = format!(
+                            "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword={}&hash={hash}",
+                            urlencoding::encode(file_name)
+                        );
+                        if duration_ms > 0 {
+                            url.push_str(&format!("&duration={duration_ms}"));
+                        }
+                        if let Ok(search) = self.client.get(&url).send().await {
+                            if let Ok(json) = search.json::<Value>().await {
+                                if let Some(arr) =
+                                    json.get("candidates").and_then(|v| v.as_array())
+                                {
+                                    candidates = arr.clone();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let cand = candidates
+            .first()
+            .ok_or_else(|| ProviderError::Msg("酷狗无匹配歌词".into()))?;
+        let id = cand
+            .get("id")
+            .map(|v| match v {
+                Value::String(s) => s.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => String::new(),
+            })
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ProviderError::Msg("酷狗歌词候选无效".into()))?;
+        let accesskey = cand
+            .get("accesskey")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ProviderError::Msg("酷狗歌词 accesskey 缺失".into()))?;
+
+        // Prefer plain LRC (base64) over encrypted KRC.
+        let dl_url = format!(
+            "https://lyrics.kugou.com/download?ver=1&client=pc&id={id}&accesskey={accesskey}&fmt=lrc&charset=utf8"
+        );
+        let dl: Value = self.client.get(&dl_url).send().await?.json().await?;
+        let content = dl
+            .get("content")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ProviderError::Msg("酷狗歌词内容为空".into()))?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(content.trim())
+            .map_err(|e| ProviderError::Parse(format!("酷狗歌词 base64: {e}")))?;
+        let lrc = String::from_utf8_lossy(&bytes).trim().to_string();
+        if lrc.is_empty() {
+            return Err(ProviderError::Msg("酷狗歌词解码为空".into()));
+        }
+        Ok((Some(lrc), None))
+    }
 }
 
 #[async_trait]
@@ -312,5 +420,12 @@ impl MusicProvider for KugouProvider {
             quality: Some(format!("{size}")),
             expires_hint: Some("stream".into()),
         })
+    }
+
+    async fn lyrics(
+        &self,
+        track_id: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        self.fetch_lyrics(track_id).await
     }
 }

@@ -288,6 +288,53 @@ impl KuwoProvider {
         Ok(list.iter().filter_map(Self::map_search_item).collect())
     }
 
+    async fn fetch_lyrics(
+        &self,
+        track_id: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        let url = format!(
+            "http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId={track_id}"
+        );
+        let resp = self.client.get(&url).send().await?;
+        let json: Value = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError::Parse(format!("kuwo lyric json: {e}")))?;
+        let list = json
+            .pointer("/data/lrclist")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if list.is_empty() {
+            return Err(ProviderError::Msg("酷我无歌词".into()));
+        }
+        let mut lines = Vec::with_capacity(list.len());
+        for row in list {
+            let time_s = row
+                .get("time")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .or_else(|| row.get("time").and_then(|v| v.as_f64()))
+                .unwrap_or(0.0);
+            let text = row
+                .get("lineLyric")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if text.is_empty() || text == "//" {
+                continue;
+            }
+            let total_ms = (time_s * 1000.0).round() as u64;
+            let mins = total_ms / 60_000;
+            let secs = (total_ms % 60_000) / 1000;
+            let ms = total_ms % 1000;
+            lines.push(format!("[{mins:02}:{secs:02}.{ms:03}]{text}"));
+        }
+        if lines.is_empty() {
+            return Err(ProviderError::Msg("酷我歌词为空".into()));
+        }
+        Ok((Some(lines.join("\n")), None))
+    }
 }
 
 #[async_trait]
@@ -372,5 +419,12 @@ impl MusicProvider for KuwoProvider {
             quality: Some(format!("{br}")),
             expires_hint: Some("stream".into()),
         })
+    }
+
+    async fn lyrics(
+        &self,
+        track_id: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        self.fetch_lyrics(track_id).await
     }
 }

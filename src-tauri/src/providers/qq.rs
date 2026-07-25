@@ -237,6 +237,45 @@ impl QqProvider {
         crate::cache::enforce_limit(&self.cache_dir);
         Ok(path)
     }
+
+    async fn fetch_lyrics(
+        &self,
+        songmid: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        let url = format!(
+            "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={songmid}&format=json&nobase64=1&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0"
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header(REFERER, "https://y.qq.com/portal/player.html")
+            .send()
+            .await?;
+        let json: Value = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError::Parse(format!("qq lyric json: {e}")))?;
+        let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if code != 0 {
+            return Err(ProviderError::Msg(format!("QQ 歌词失败 code={code}")));
+        }
+        let lrc = json
+            .get("lyric")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let tlyric = json
+            .get("trans")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        if lrc.is_none() && tlyric.is_none() {
+            return Err(ProviderError::Msg("QQ 无歌词".into()));
+        }
+        Ok((lrc, tlyric))
+    }
 }
 
 #[async_trait]
@@ -330,5 +369,12 @@ impl MusicProvider for QqProvider {
             quality: Some("m4a".into()),
             expires_hint: Some("stream".into()),
         })
+    }
+
+    async fn lyrics(
+        &self,
+        track_id: &str,
+    ) -> Result<(Option<String>, Option<String>), ProviderError> {
+        self.fetch_lyrics(track_id).await
     }
 }
