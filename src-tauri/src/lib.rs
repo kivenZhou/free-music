@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod models;
 mod providers;
+mod voice;
 
 use commands::AppState;
 use db::Database;
@@ -14,6 +15,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
+use voice::VoiceState;
 
 fn show_main(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
@@ -39,6 +41,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .manage(state)
+        .manage(VoiceState::default())
         .setup(|app| {
             #[cfg(desktop)]
             app.handle()
@@ -60,6 +63,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
+                        voice::stop_on_exit(app);
                         app.exit(0);
                     }
                     "show" => show_main(app),
@@ -109,6 +113,11 @@ pub fn run() {
             commands::list_playlist_tracks,
             commands::add_to_playlist,
             commands::remove_from_playlist,
+            voice::voice_assistant_info,
+            voice::start_voice_assistant,
+            voice::stop_voice_assistant,
+            voice::report_voice_web_status,
+            voice::voice_speak,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

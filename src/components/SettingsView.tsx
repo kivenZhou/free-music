@@ -13,6 +13,9 @@ interface Props {
   onProviderId: (id: string) => void;
   autoSkip: boolean;
   onAutoSkip: (v: boolean) => void;
+  voiceEnabled: boolean;
+  onVoiceEnabled: (v: boolean) => void;
+  voiceStatusText?: string;
   active?: boolean;
   onUpdateAvailable?: (update: Update | null) => void;
 }
@@ -23,6 +26,9 @@ export function SettingsView({
   onProviderId,
   autoSkip,
   onAutoSkip,
+  voiceEnabled,
+  onVoiceEnabled,
+  voiceStatusText,
   active = true,
   onUpdateAvailable,
 }: Props) {
@@ -160,6 +166,28 @@ export function SettingsView({
             />
             <span>{autoSkip ? "自动跳过" : "停在当前曲并提示"}</span>
           </label>
+        </div>
+
+        <div className="settings-block">
+          <h2>语音助手</h2>
+          <p className="settings-desc">
+            默认关闭。开启后可说「小栈小栈」唤醒。支持播控、搜歌、歌词、收藏、
+            切换音源、粤语/年代等主题歌单、追加歌曲、播放收藏等。
+            <br />
+            语音回复优先使用在线神经语音（微软晓晓，无需 API Key；需联网），失败时回退系统朗读。
+            macOS 请使用打包后的 YinZhan.app。
+          </p>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={voiceEnabled}
+              onChange={(e) => onVoiceEnabled(e.target.checked)}
+            />
+            <span>{voiceEnabled ? "已开启，后台聆听中" : "关闭"}</span>
+          </label>
+          {voiceEnabled && voiceStatusText ? (
+            <p className="settings-voice-status">{voiceStatusText}</p>
+          ) : null}
         </div>
 
         <div className="settings-block">

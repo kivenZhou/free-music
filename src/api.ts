@@ -62,7 +62,17 @@ export const api = {
     invoke<void>("add_to_playlist", { playlistId, track }),
   removeFromPlaylist: (playlistId: number, provider: string, trackId: string) =>
     invoke<void>("remove_from_playlist", { playlistId, provider, trackId }),
+  voiceAssistantInfo: () => invoke<VoiceAssistantInfo>("voice_assistant_info"),
+  startVoiceAssistant: () => invoke<void>("start_voice_assistant"),
+  stopVoiceAssistant: () => invoke<void>("stop_voice_assistant"),
 };
+
+export interface VoiceAssistantInfo {
+  running: boolean;
+  backend: string;
+  wakeWord: string;
+  supported: boolean;
+}
 
 export interface CacheStats {
   sizeBytes: number;

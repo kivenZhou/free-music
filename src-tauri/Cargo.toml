@@ -1,6 +1,6 @@
 [package]
 name = "yinzhan"
-version = "0.1.2"
+version = "0.2.0"
 description = "音栈 — 国内优先的桌面音乐客户端"
 authors = ["zzy"]
 edition = "2021"
@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
@@ -18,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies", "gzip", "stream"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 urlencoding = "2"
@@ -28,6 +29,7 @@ async-trait = "0.1"
 futures = { version = "0.3", default-features = false, features = ["std"] }
 base64 = "0.22"
 tauri-plugin-process = "2.3.1"
+msedge-tts = "0.4.0"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.10.1"
