@@ -174,14 +174,16 @@ export function PlaylistsView({
         <aside className="playlist-rail">
           <div className="playlist-rail-head">
             <span>我的歌单</span>
-            <button
-              type="button"
-              className="icon-btn"
-              title="新建歌单"
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={16} />
-            </button>
+            {!creating ? (
+              <button
+                type="button"
+                className="icon-btn"
+                title="新建歌单"
+                onClick={() => setCreating(true)}
+              >
+                <Plus size={16} />
+              </button>
+            ) : null}
           </div>
 
           {creating ? (
@@ -196,26 +198,32 @@ export function PlaylistsView({
                 autoFocus
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="歌单名称"
+                placeholder="给歌单起个名字"
+                aria-label="歌单名称"
               />
-              <button type="submit" className="ghost-btn">
-                创建
-              </button>
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => {
-                  setCreating(false);
-                  setNewName("");
-                }}
-              >
-                取消
-              </button>
+              <div className="playlist-create-actions">
+                <button type="submit" className="play-all-btn playlist-create-submit">
+                  创建
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setCreating(false);
+                    setNewName("");
+                  }}
+                >
+                  取消
+                </button>
+              </div>
             </form>
           ) : null}
 
-          {playlists.length === 0 ? (
-            <div className="playlist-rail-empty">还没有歌单，点 + 新建</div>
+          {playlists.length === 0 && !creating ? (
+            <div className="playlist-rail-empty">
+              <strong>还没有歌单</strong>
+              <span>点右上角 + 新建一个</span>
+            </div>
           ) : (
             <ul className="playlist-rail-list">
               {playlists.map((p) => (
@@ -258,16 +266,21 @@ export function PlaylistsView({
                         placeholder="歌单名称"
                         aria-label="歌单名称"
                       />
-                      <button type="submit" className="ghost-btn">
-                        保存
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={() => setRenaming(false)}
-                      >
-                        取消
-                      </button>
+                      <div className="playlist-create-actions">
+                        <button
+                          type="submit"
+                          className="play-all-btn playlist-create-submit"
+                        >
+                          保存
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => setRenaming(false)}
+                        >
+                          取消
+                        </button>
+                      </div>
                     </form>
                   ) : (
                     <>
@@ -285,7 +298,7 @@ export function PlaylistsView({
                   {!renaming ? (
                     <button
                       type="button"
-                      className="ghost-btn"
+                      className="ghost-btn playlist-action-btn"
                       onClick={startRename}
                     >
                       <Pencil size={14} />
@@ -294,7 +307,7 @@ export function PlaylistsView({
                   ) : null}
                   <button
                     type="button"
-                    className="ghost-btn danger"
+                    className="ghost-btn danger playlist-action-btn"
                     onClick={() => void deleteActive()}
                   >
                     <Trash2 size={14} />
@@ -303,7 +316,7 @@ export function PlaylistsView({
                   {confirmDelete ? (
                     <button
                       type="button"
-                      className="ghost-btn"
+                      className="ghost-btn playlist-action-btn"
                       onClick={() => setConfirmDelete(false)}
                     >
                       取消
@@ -312,23 +325,32 @@ export function PlaylistsView({
                 </div>
               </div>
               <div className="playlist-main-scroll">
-                <SongList
-                  tracks={tracks}
-                  currentKey={currentKey}
-                  playing={playing}
-                  favoriteKeys={favoriteKeys}
-                  onPlay={onPlay}
-                  onTogglePlay={onTogglePlay}
-                  onPlayNext={onPlayNext}
-                  onAddToQueue={onAddToQueue}
-                  onToggleFavorite={onToggleFavorite}
-                  onAddToPlaylist={onAddToPlaylist}
-                  onRemoveTrack={(t) => void removeTrack(t)}
-                />
+                {tracks.length === 0 ? (
+                  <div className="empty playlist-empty">
+                    <ListMusic size={28} strokeWidth={1.5} />
+                    <strong>歌单还是空的</strong>
+                    <span>在榜单或搜索里，把喜欢的歌加入这个歌单</span>
+                  </div>
+                ) : (
+                  <SongList
+                    tracks={tracks}
+                    currentKey={currentKey}
+                    playing={playing}
+                    favoriteKeys={favoriteKeys}
+                    onPlay={onPlay}
+                    onTogglePlay={onTogglePlay}
+                    onPlayNext={onPlayNext}
+                    onAddToQueue={onAddToQueue}
+                    onToggleFavorite={onToggleFavorite}
+                    onAddToPlaylist={onAddToPlaylist}
+                    onRemoveTrack={(t) => void removeTrack(t)}
+                  />
+                )}
               </div>
             </>
           ) : (
-            <div className="empty">
+            <div className="empty playlist-empty">
+              <ListMusic size={28} strokeWidth={1.5} />
               <strong>选择或新建一个歌单</strong>
               <span>可在曲目列表里把歌加进歌单</span>
             </div>

@@ -33,12 +33,28 @@ export function FavoritesView({
 }: Props) {
   const [items, setItems] = useState<FavoriteItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
     api
       .listFavorites()
-      .then(setItems)
-      .catch((e) => setError(String(e)));
+      .then((list) => {
+        if (!cancelled) {
+          setItems(list);
+          setError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refreshToken]);
 
   const tracks = items.map((i) => i.track);
@@ -64,18 +80,22 @@ export function FavoritesView({
       </header>
       <div className="panel-body">
         {error ? <div className="error-banner">{error}</div> : null}
-        <SongList
-          tracks={tracks}
-          currentKey={currentKey}
-          playing={playing}
-          favoriteKeys={favoriteKeys}
-          onPlay={onPlay}
-          onTogglePlay={onTogglePlay}
-          onPlayNext={onPlayNext}
-          onAddToQueue={onAddToQueue}
-          onAddToPlaylist={onAddToPlaylist}
-          onToggleFavorite={onToggleFavorite}
-        />
+        {loading && tracks.length === 0 ? (
+          <div className="empty">正在加载收藏…</div>
+        ) : (
+          <SongList
+            tracks={tracks}
+            currentKey={currentKey}
+            playing={playing}
+            favoriteKeys={favoriteKeys}
+            onPlay={onPlay}
+            onTogglePlay={onTogglePlay}
+            onPlayNext={onPlayNext}
+            onAddToQueue={onAddToQueue}
+            onAddToPlaylist={onAddToPlaylist}
+            onToggleFavorite={onToggleFavorite}
+          />
+        )}
       </div>
     </section>
   );

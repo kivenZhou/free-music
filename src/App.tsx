@@ -921,8 +921,6 @@ function App() {
 
   return (
     <div className={`app ${mini ? "mini" : ""}`}>
-      {!mini ? (
-        <>
       <aside className={`sidebar ${dragSourceId ? "is-sorting-sources" : ""}`}>
         <div className="brand">
           <BrandMark className="brand-mark" size={42} />
@@ -1131,8 +1129,6 @@ function App() {
           />
         </div>
       </main>
-        </>
-      ) : null}
 
       <PlaylistPicker
         open={Boolean(playlistPickTrack)}
