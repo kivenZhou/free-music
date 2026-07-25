@@ -66,7 +66,8 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           ARCH="${{ matrix.arch_tag }}"
           mkdir -p dist-packages
-          shopt -s nullglob globstar
+          # nullglob only — globstar is unavailable on some Actions bash builds
+          shopt -s nullglob
 
           # Prefer target-specific dirs (cross-compile) then default release/
           bundle_roots=(
