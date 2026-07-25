@@ -230,6 +230,8 @@ pub async fn fetch_lyrics(
     provider: String,
     title: Option<String>,
     artist: Option<String>,
+    album: Option<String>,
+    duration_ms: Option<u64>,
 ) -> Result<LyricsPayload, String> {
     let (lrc, translated_lrc, source) = state
         .providers
@@ -238,6 +240,8 @@ pub async fn fetch_lyrics(
             &provider,
             title.as_deref(),
             artist.as_deref(),
+            album.as_deref(),
+            duration_ms,
         )
         .await
         .map_err(|e| e.to_string())?;

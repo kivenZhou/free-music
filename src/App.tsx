@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, providerLabel } from "./api";
@@ -16,8 +16,14 @@ import { SettingsView } from "./components/SettingsView";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { TrendingUp, Search, Heart, Settings, ListMusic, GripVertical } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
-import type { NavKey, ProviderInfo, RepeatMode, Track } from "./types";
+import type { FavoriteItem, NavKey, ProviderInfo, RepeatMode, Track } from "./types";
 import { checkForInstallableUpdate } from "./updater";
+import {
+  readVoiceEnabled,
+  VoiceAssistant,
+  writeVoiceEnabled,
+  type VoiceUiStatus,
+} from "./voice";
 import "./App.css";
 
 const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
@@ -28,6 +34,195 @@ const MINI_SIZE = { width: 480, height: 96 };
 function favKey(t: Track) {
   return `${t.provider}:${t.id}`;
 }
+
+/** Strip track-number prefixes / artist suffixes so cross-source dupes match. */
+function normalizeSongTitle(title: string): string {
+  let s = (title || "").toLowerCase().trim();
+  s = s.replace(/^(?:p\d+\s*)?\d{1,3}[\.．、．\s]+/i, "");
+  s = s.replace(/^[\[【\(（][^\]】\)）]{0,24}[\]】\)）]\s*/g, "");
+  s = s.replace(
+    /\s*[-—–_～~｜|／/]\s*[\u4e00-\u9fffA-Za-z0-9·\s]{1,20}$/u,
+    "",
+  );
+  s = s.replace(
+    /(?:官方(?:歌词)?版|直播版|现场版|完整版|高音质|无损|音频|伴奏|纯音乐|翻唱)$/g,
+    "",
+  );
+  s = s.replace(/[\s\-—–_～~｜|·.,，。!！?？、；;：:（）()【】\[\]"'“”‘’]/g, "");
+  return s;
+}
+
+function normalizeArtistName(artist: string): string {
+  return (artist || "")
+    .toLowerCase()
+    .replace(/合集|精选|音乐|无损|音频|合辑|playlist|collection/g, "")
+    .replace(/[\s\-—–_～~｜|·.,，。!！?？、；;：:（）()【】\[\]"'“”‘’]/g, "")
+    .trim();
+}
+
+function isSameSong(a: Track, b: Track): boolean {
+  if (favKey(a) === favKey(b)) return true;
+  const ta = normalizeSongTitle(a.title || "");
+  const tb = normalizeSongTitle(b.title || "");
+  if (ta.length < 2 || tb.length < 2) return false;
+
+  const titleHit =
+    ta === tb ||
+    (ta.length >= 4 && tb.length >= 4 && (ta.includes(tb) || tb.includes(ta)));
+  if (!titleHit) return false;
+
+  const aa = normalizeArtistName(a.artist || "");
+  const ab = normalizeArtistName(b.artist || "");
+  // B站合集等「歌手」常是 UP 主名，标题足够长时只靠标题判重
+  if (!aa || !ab) return true;
+  if (aa.includes(ab) || ab.includes(aa)) return true;
+  if (Math.min(ta.length, tb.length) >= 6) return true;
+  return false;
+}
+
+function uniqueTracks(list: Track[]): Track[] {
+  const out: Track[] = [];
+  for (const t of list) {
+    if (out.some((x) => isSameSong(x, t))) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+/** Higher = closer title match. Exact favorites must beat “香草吧噗动态鼓谱”. */
+function lcsLen(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (!m || !n) return 0;
+  // Rolling DP to keep it light for short Chinese titles
+  let prev = new Array<number>(n + 1).fill(0);
+  let cur = new Array<number>(n + 1).fill(0);
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      cur[j] =
+        a[i - 1] === b[j - 1] ? (prev[j - 1] as number) + 1 : Math.max(prev[j] as number, cur[j - 1] as number);
+    }
+    [prev, cur] = [cur, prev];
+    cur.fill(0);
+  }
+  return prev[n] as number;
+}
+
+/** Soften common ASR confusions inside short titles. */
+function softenTitle(s: string): string {
+  return s
+    .replace(/[巴八扒]/g, "吧")
+    .replace(/[扑蒲埔]/g, "噗")
+    .replace(/[的得地]/g, "");
+}
+
+function parseArtistTitleQuery(query: string): { artist: string; title: string } {
+  const q = query.trim();
+  const m = q.match(/^(.+?)的(.+)$/);
+  if (m?.[1] && m?.[2] && m[1].length >= 2 && m[2].length >= 1) {
+    return { artist: m[1].trim(), title: m[2].trim() };
+  }
+  return { artist: "", title: q };
+}
+
+function scoreTrackMatch(track: Track, query: string): number {
+  const parsed = parseArtistTitleQuery(query);
+  const qTitle = softenTitle(normalizeSongTitle(parsed.title || query));
+  const qArtist = normalizeArtistName(parsed.artist || "");
+  const qFull = softenTitle(normalizeSongTitle(query));
+  const title = softenTitle(normalizeSongTitle(track.title || ""));
+  const artist = normalizeArtistName(track.artist || "");
+  if (!qTitle && !qFull) return 0;
+  if (!title && !artist) return 0;
+
+  let score = 0;
+  const candidates = [qTitle, qFull].filter((x, i, arr) => x && arr.indexOf(x) === i);
+
+  for (const q of candidates) {
+    if (title === q) {
+      score = Math.max(score, 100);
+      continue;
+    }
+    if (title.startsWith(q)) {
+      const extra = title.length - q.length;
+      score = Math.max(score, extra <= 2 ? 92 : Math.max(48, Math.round(88 * (q.length / title.length))));
+      continue;
+    }
+    if (q.startsWith(title) && title.length >= 2) {
+      const extra = q.length - title.length;
+      score = Math.max(score, extra <= 2 ? 88 : 52);
+      continue;
+    }
+    if (title.includes(q) && q.length >= 2) {
+      score = Math.max(score, Math.round(42 + 50 * (q.length / title.length)));
+      continue;
+    }
+    if (q.includes(title) && title.length >= 2) {
+      score = Math.max(score, Math.round(42 + 50 * (title.length / q.length)));
+      continue;
+    }
+    // Fuzzy: tolerate 1–2 ASR mistakes (香草八噗 ≈ 香草吧噗)
+    if (q.length >= 3 && title.length >= 3) {
+      const lcs = lcsLen(title, q);
+      const ratio = lcs / Math.max(q.length, title.length);
+      const cover = lcs / q.length;
+      if (cover >= 0.75 && ratio >= 0.6) {
+        score = Math.max(score, Math.round(55 + 40 * cover));
+      } else if (cover >= 0.6 && lcs >= 3) {
+        score = Math.max(score, Math.round(40 + 30 * cover));
+      }
+    }
+  }
+
+  if (qArtist && artist) {
+    if (artist === qArtist || artist.includes(qArtist) || qArtist.includes(artist)) {
+      score = Math.min(100, score + (score >= 40 ? 15 : 25));
+    }
+  } else if (!qArtist && artist && qFull.includes(artist) && title) {
+    // 「南拳妈妈香草吧噗」without 的
+    if (qFull.includes(title)) score = Math.max(score, 80);
+  }
+
+  return score;
+}
+
+function findBestMatchingTrack(
+  tracks: Track[],
+  query: string,
+  minScore = 1,
+): { track: Track; index: number; score: number } | null {
+  let best: Track | null = null;
+  let bestIndex = -1;
+  let bestScore = 0;
+  for (let i = 0; i < tracks.length; i += 1) {
+    const track = tracks[i];
+    if (!track || track.playability === "unavailable") continue;
+    const score = scoreTrackMatch(track, query);
+    if (score > bestScore) {
+      bestScore = score;
+      best = track;
+      bestIndex = i;
+    }
+  }
+  return best && bestIndex >= 0 && bestScore >= minScore
+    ? { track: best, index: bestIndex, score: bestScore }
+    : null;
+}
+
+function findFavoriteTrack(
+  favorites: FavoriteItem[],
+  query: string,
+): { track: Track; score: number } | null {
+  const hit = findBestMatchingTrack(
+    favorites.map((item) => item.track).filter(Boolean),
+    query,
+    55,
+  );
+  return hit ? { track: hit.track, score: hit.score } : null;
+}
+
+/** Queue jump only for near-exact title; favorites win over long-suffix hits. */
+const QUEUE_STRONG_SCORE = 92;
 
 function loadProviderOrder(): string[] {
   try {
@@ -78,9 +273,10 @@ function readStoredVolume(): number {
 }
 
 function readStoredRepeat(): RepeatMode {
-  const raw = localStorage.getItem("yinzhan-repeat");
+  // v2: default list-loop (was "off", which auto-persisted on first launch).
+  const raw = localStorage.getItem("yinzhan-repeat-v2");
   if (raw === "all" || raw === "one" || raw === "off") return raw;
-  return "off";
+  return "all";
 }
 
 function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
@@ -138,6 +334,7 @@ function App() {
   );
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [favToken, setFavToken] = useState(0);
+  const favoritesRef = useRef<FavoriteItem[]>([]);
   const [playlistToken, setPlaylistToken] = useState(0);
   const [playlistPickTrack, setPlaylistPickTrack] = useState<Track | null>(null);
 
@@ -161,6 +358,21 @@ function App() {
   const [repeatMode, setRepeatMode] = useState<RepeatMode>(readStoredRepeat);
   const [volume, setVolume] = useState(readStoredVolume);
   const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
+  const [voiceEnabled, setVoiceEnabled] = useState(readVoiceEnabled);
+  const [voiceUi, setVoiceUi] = useState<{
+    status: VoiceUiStatus;
+    detail: string;
+  }>({ status: "off", detail: "" });
+  const voiceRef = useRef<VoiceAssistant | null>(null);
+  const voiceHoldPlayingRef = useRef(false);
+  /** Last voice catalog feed — used by「追加N首」. */
+  const voiceFeedRef = useRef<{
+    mode: "search" | "chart" | "none";
+    query?: string;
+    provider?: string | null;
+    chartId?: string;
+    offset: number;
+  }>({ mode: "none", offset: 0 });
   const [queueOpen, setQueueOpen] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
@@ -189,7 +401,7 @@ function App() {
   const queueRef = useRef<Track[]>(storedQueue?.tracks ?? []);
   const queueIndexRef = useRef(storedQueue?.index ?? -1);
   const shuffleRef = useRef(false);
-  const repeatRef = useRef<RepeatMode>("off");
+  const repeatRef = useRef<RepeatMode>(readStoredRepeat());
   const playGenRef = useRef(0);
   const failSkipRef = useRef(0);
   const autoSkipRef = useRef(true);
@@ -244,8 +456,16 @@ function App() {
 
   const refreshFavorites = useCallback(async () => {
     const list = await api.listFavorites();
+    favoritesRef.current = list;
     setFavoriteKeys(new Set(list.map((i) => favKey(i.track))));
     setFavToken((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    // Match app chrome so resize / mini expand never flashes system white.
+    void getCurrentWindow()
+      .setBackgroundColor("#141210")
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -331,7 +551,7 @@ function App() {
   }, [shuffle]);
 
   useEffect(() => {
-    localStorage.setItem("yinzhan-repeat", repeatMode);
+    localStorage.setItem("yinzhan-repeat-v2", repeatMode);
   }, [repeatMode]);
 
   useEffect(() => {
@@ -389,6 +609,8 @@ function App() {
     if (!track || !audio) return;
 
     const gen = ++playGenRef.current;
+    // New play attempt clears consecutive-fail lockout so manual clicks recover.
+    failSkipRef.current = 0;
     setQueue(tracks);
     setQueueIndex(index);
     queueRef.current = tracks;
@@ -420,7 +642,14 @@ function App() {
         throw new Error("未获取到可播地址");
       }
       audio.src = src;
-      await audio.play();
+      try {
+        await audio.play();
+      } catch {
+        // After TTS / device churn, first play() can fail — one hard retry.
+        if (gen !== playGenRef.current) return;
+        audio.load();
+        await audio.play();
+      }
       if (gen !== playGenRef.current) return;
       failSkipRef.current = 0;
       suppressTimeRef.current = false;
@@ -566,6 +795,20 @@ function App() {
     localStorage.setItem("yinzhan-volume", String(volume));
     localStorage.setItem("yinzhan-muted", muted ? "1" : "0");
   }, [volume, muted, applyVolume]);
+
+  const onVoiceMusicHold = useCallback((hold: boolean, resume = true) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (hold) {
+      voiceHoldPlayingRef.current = !audio.paused;
+      if (!audio.paused) audio.pause();
+      return;
+    }
+    if (resume && voiceHoldPlayingRef.current) {
+      void audio.play().catch(() => undefined);
+    }
+    voiceHoldPlayingRef.current = false;
+  }, []);
 
   const playFromList = useCallback(
     (track: Track, list: Track[]) => {
@@ -731,22 +974,32 @@ function App() {
 
   const toggleMini = useCallback(async () => {
     const win = getCurrentWindow();
+    const nextPaint = () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+
     try {
       if (!mini) {
+        // Collapse: switch to mini layout first, then shrink.
         const size = await win.innerSize();
         const factor = await win.scaleFactor();
         normalSizeRef.current = {
           width: Math.round(size.width / factor),
           height: Math.round(size.height / factor),
         };
-        await win.setMinSize(new LogicalSize(360, 88));
-        await win.setSize(new LogicalSize(MINI_SIZE.width, MINI_SIZE.height));
-        await win.setAlwaysOnTop(true);
         setQueueOpen(false);
         setLyricsOpen(false);
         setMini(true);
         localStorage.setItem("yinzhan-mini", "1");
+        await nextPaint();
+        await win.setMinSize(new LogicalSize(360, 88));
+        await win.setSize(new LogicalSize(MINI_SIZE.width, MINI_SIZE.height));
+        await win.setAlwaysOnTop(true);
       } else {
+        // Expand: restore size first (dark window bg), then show full chrome.
         await win.setAlwaysOnTop(false);
         await win.setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height));
         await win.setSize(
@@ -800,6 +1053,495 @@ function App() {
   const toggleMute = useCallback(() => {
     setMuted((m) => !m);
   }, []);
+
+  const onVoiceEnabled = useCallback((on: boolean) => {
+    setVoiceEnabled(on);
+    writeVoiceEnabled(on);
+  }, []);
+
+  useEffect(() => {
+    const assistant = new VoiceAssistant({
+      onNext: () => undefined,
+      onPrev: () => undefined,
+      onPlay: () => undefined,
+      onPause: () => undefined,
+      onToggle: () => undefined,
+      onMute: () => undefined,
+      onVolumeUp: () => undefined,
+      onVolumeDown: () => undefined,
+      onShowLyrics: () => undefined,
+      onHideLyrics: () => undefined,
+      onFavorite: async () => undefined,
+      onUnfavorite: async () => undefined,
+      onSearchPlay: async () => undefined,
+      onThemePlay: async () => undefined,
+      onAppendTracks: async () => undefined,
+      onProviderPlay: async () => undefined,
+      onSwitchProvider: () => undefined,
+      onShuffle: () => undefined,
+      onRepeat: () => undefined,
+      onClearQueue: () => undefined,
+      onShowQueue: () => undefined,
+      onWhatsPlaying: async () => undefined,
+      onPlayFavorites: async () => undefined,
+      onStatus: (status, detail) => setVoiceUi({ status, detail }),
+    });
+    voiceRef.current = assistant;
+    return () => {
+      void assistant.stop();
+      voiceRef.current = null;
+    };
+  }, []);
+
+  const appendTracksToQueue = useCallback((tracks: Track[]) => {
+    if (!tracks.length) return;
+    const q = queueRef.current;
+    const i = queueIndexRef.current;
+    const fresh = uniqueTracks(tracks).filter(
+      (t) => !q.some((x) => isSameSong(x, t)),
+    );
+    if (!fresh.length) return;
+    if (q.length === 0 || i < 0) {
+      void playTrackAtRef.current(fresh, 0);
+      return;
+    }
+    const next = [...q, ...fresh];
+    setQueue(next);
+    queueRef.current = next;
+  }, []);
+
+  /** Append one track to the queue and start playing it (keeps existing queue). */
+  const playOrAppendOne = useCallback((track: Track) => {
+    const q = queueRef.current;
+    const i = queueIndexRef.current;
+    if (q.length === 0 || i < 0) {
+      void playTrackAtRef.current([track], 0);
+      return;
+    }
+    const existing = q.findIndex((x) => isSameSong(x, track));
+    if (existing >= 0) {
+      void playTrackAtRef.current(q, existing);
+      return;
+    }
+    const next = [...q, track];
+    setQueue(next);
+    queueRef.current = next;
+    void playTrackAtRef.current(next, next.length - 1);
+  }, []);
+
+  const voiceSearchPlay = useCallback(
+    async (query: string, provider?: string) => {
+      const q = query.trim();
+      if (!q) {
+        void invoke("voice_speak", { text: "请告诉我歌名或歌手" });
+        return;
+      }
+      try {
+        const speakPlay = async (track: Track, prefix = "") => {
+          const title = track.title?.trim() || q;
+          const artist = track.artist?.trim();
+          const head = prefix ? `${prefix}${title}` : title;
+          const say = artist ? `为你播放${head}，${artist}` : `为你播放${head}`;
+          await invoke("voice_speak", { text: say });
+        };
+
+        // Resolve against live favorites (ref + refresh) so title-only hits work.
+        let favorites = favoritesRef.current;
+        try {
+          favorites = await api.listFavorites();
+          favoritesRef.current = favorites;
+        } catch {
+          // keep cached ref
+        }
+
+        const queueHit = findBestMatchingTrack(queueRef.current, q, 1);
+        const favHit = findFavoriteTrack(favorites, q);
+
+        // 1) Queue only if near-exact, and not worse than a favorite hit
+        if (
+          queueHit &&
+          queueHit.score >= QUEUE_STRONG_SCORE &&
+          (!favHit || queueHit.score >= favHit.score)
+        ) {
+          void playTrackAtRef.current(queueRef.current, queueHit.index);
+          await speakPlay(queueHit.track);
+          return;
+        }
+
+        // 2) Favorites — title match is enough (no need to say artist)
+        if (favHit) {
+          voiceFeedRef.current = {
+            mode: "search",
+            query: q,
+            provider: favHit.track.provider,
+            offset: 1,
+          };
+          playOrAppendOne(favHit.track);
+          await speakPlay(favHit.track, "收藏里的");
+          return;
+        }
+
+        // 3) Weaker queue hit
+        if (queueHit && queueHit.score >= 70) {
+          void playTrackAtRef.current(queueRef.current, queueHit.index);
+          await speakPlay(queueHit.track);
+          return;
+        }
+
+        // 4) Search default / spoken provider — append best title match only
+        const searchProvider = provider || providerId || "netease";
+        if (provider) {
+          setProviderId(provider);
+          setNav("charts");
+        }
+        const tracks = await api.searchTracks(q, 12, searchProvider);
+        const list = uniqueTracks(
+          tracks.filter((t) => t.playability !== "unavailable"),
+        );
+        if (!list.length) {
+          await invoke("voice_speak", { text: `没有找到${q}` });
+          return;
+        }
+        const searchHit = findBestMatchingTrack(list, q, 1);
+        const track = searchHit?.track ?? list[0];
+        voiceFeedRef.current = {
+          mode: "search",
+          query: q,
+          provider: searchProvider,
+          offset: 1,
+        };
+        playOrAppendOne(track);
+        await speakPlay(track);
+      } catch (e) {
+        console.error("voice search play failed", e);
+        await invoke("voice_speak", { text: "搜索失败，请再说一次" });
+      }
+    },
+    [playOrAppendOne, providerId],
+  );
+
+  const voiceThemePlay = useCallback(
+    async (query: string, provider?: string, limit = 30) => {
+      const q = query.trim();
+      if (!q) {
+        void invoke("voice_speak", { text: "请告诉我想听什么风格" });
+        return;
+      }
+      try {
+        if (provider) {
+          setProviderId(provider);
+          setNav("charts");
+        }
+        const tracks = await api.searchTracks(
+          q,
+          Math.min(50, Math.max(12, limit)),
+          provider ?? "all",
+        );
+        const playable = uniqueTracks(
+          tracks.filter((t) => t.playability !== "unavailable"),
+        );
+        if (!playable.length) {
+          await invoke("voice_speak", { text: `没有找到${q}相关的歌` });
+          return;
+        }
+        voiceFeedRef.current = {
+          mode: "search",
+          query: q,
+          provider: provider ?? "all",
+          offset: playable.length,
+        };
+        playAll(playable);
+        await invoke("voice_speak", {
+          text: `为你放入${playable.length}首${q}相关歌曲`,
+        });
+      } catch (e) {
+        console.error("voice theme play failed", e);
+        await invoke("voice_speak", { text: "搜索失败，请再说一次" });
+      }
+    },
+    [playAll],
+  );
+
+  const voiceAppendTracks = useCallback(
+    async (count: number) => {
+      const n = Math.min(50, Math.max(1, count || 20));
+      try {
+        const feed = voiceFeedRef.current;
+        const seenQueue = queueRef.current;
+        let fresh: Track[] = [];
+
+        if (feed.mode === "search" && feed.query) {
+          const batch = await api.searchTracks(
+            feed.query,
+            Math.min(50, feed.offset + n + 20),
+            feed.provider ?? "all",
+          );
+          fresh = uniqueTracks(
+            batch.filter((t) => t.playability !== "unavailable"),
+          )
+            .filter((t) => !seenQueue.some((x) => isSameSong(x, t)))
+            .slice(0, n);
+          feed.offset = Math.max(feed.offset, batch.length);
+        } else if (feed.mode === "chart" && feed.chartId && feed.provider) {
+          const batch = await api.chartTracks(
+            feed.chartId,
+            Math.max(n * 2, n + 10),
+            feed.provider,
+            feed.offset,
+          );
+          fresh = uniqueTracks(
+            batch.filter((t) => t.playability !== "unavailable"),
+          )
+            .filter((t) => !seenQueue.some((x) => isSameSong(x, t)))
+            .slice(0, n);
+          feed.offset += batch.length;
+        } else {
+          const provider = providerId;
+          const charts = await api.listCharts(provider);
+          if (!charts.length) {
+            await invoke("voice_speak", { text: "暂时没有可追加的歌曲" });
+            return;
+          }
+          const chart = charts[0];
+          const offset = queueRef.current.length;
+          const batch = await api.chartTracks(
+            chart.id,
+            Math.max(n * 2, n + 10),
+            provider,
+            offset,
+          );
+          fresh = uniqueTracks(
+            batch.filter((t) => t.playability !== "unavailable"),
+          )
+            .filter((t) => !seenQueue.some((x) => isSameSong(x, t)))
+            .slice(0, n);
+          voiceFeedRef.current = {
+            mode: "chart",
+            provider,
+            chartId: chart.id,
+            offset: offset + batch.length,
+          };
+        }
+
+        if (!fresh.length) {
+          await invoke("voice_speak", { text: "没有更多不同的歌了" });
+          return;
+        }
+        appendTracksToQueue(fresh);
+        await invoke("voice_speak", {
+          text: `已追加${fresh.length}首歌到播放列表`,
+        });
+      } catch (e) {
+        console.error("voice append failed", e);
+        await invoke("voice_speak", { text: "追加失败，请再说一次" });
+      }
+    },
+    [appendTracksToQueue, providerId],
+  );
+
+  const voiceProviderPlay = useCallback(
+    async (provider: string) => {
+      try {
+        setProviderId(provider);
+        setNav("charts");
+        const charts = await api.listCharts(provider);
+        if (!charts.length) {
+          await invoke("voice_speak", {
+            text: `${providerLabel(provider)}暂时没有可播放的榜单`,
+          });
+          return;
+        }
+        const chart = charts[0];
+        const tracks = await api.chartTracks(chart.id, 40, provider, 0);
+        const playable = uniqueTracks(
+          tracks.filter((t) => t.playability !== "unavailable"),
+        );
+        if (!playable.length) {
+          await invoke("voice_speak", {
+            text: `${providerLabel(provider)}暂时没有可播放的歌曲`,
+          });
+          return;
+        }
+        voiceFeedRef.current = {
+          mode: "chart",
+          provider,
+          chartId: chart.id,
+          offset: playable.length,
+        };
+        playAll(playable);
+        await invoke("voice_speak", {
+          text: `已切换到${providerLabel(provider)}，为你播放${chart.name || "热门歌曲"}`,
+        });
+      } catch (e) {
+        console.error("voice provider play failed", e);
+        await invoke("voice_speak", { text: "加载音源失败，请再说一次" });
+      }
+    },
+    [playAll],
+  );
+
+  const voiceSwitchProvider = useCallback((provider: string) => {
+    setProviderId(provider);
+    setNav("charts");
+  }, []);
+
+  const voicePlayFavorites = useCallback(async () => {
+    try {
+      const items = await api.listFavorites();
+      const tracks = uniqueTracks(
+        items
+          .map((i) => i.track)
+          .filter((t) => t.playability !== "unavailable"),
+      );
+      if (!tracks.length) {
+        await invoke("voice_speak", { text: "收藏夹还是空的" });
+        return;
+      }
+      voiceFeedRef.current = { mode: "none", offset: 0 };
+      playAll(tracks);
+      await invoke("voice_speak", { text: `为你播放收藏里的${tracks.length}首歌` });
+    } catch (e) {
+      console.error("voice play favorites failed", e);
+      await invoke("voice_speak", { text: "打开收藏失败" });
+    }
+  }, [playAll]);
+
+  const voiceWhatsPlaying = useCallback(async () => {
+    const track = current;
+    if (!track) {
+      await invoke("voice_speak", { text: "当前没有在播放的歌曲" });
+      return;
+    }
+    const title = track.title?.trim() || "未知歌曲";
+    const artist = track.artist?.trim();
+    await invoke("voice_speak", {
+      text: artist ? `正在播放${title}，${artist}` : `正在播放${title}`,
+    });
+  }, [current]);
+
+  useEffect(() => {
+    voiceRef.current?.updateHandlers({
+      onNext: () => playNext(),
+      onPrev: () => playPrev(),
+      onPlay: () => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (audio.paused) {
+          if (
+            !audio.getAttribute("src") &&
+            queueRef.current.length > 0 &&
+            queueIndexRef.current >= 0
+          ) {
+            void playTrackAtRef.current(queueRef.current, queueIndexRef.current);
+            return;
+          }
+          void audio.play().catch(() => undefined);
+        }
+      },
+      onPause: () => {
+        audioRef.current?.pause();
+      },
+      onToggle: () => togglePlay(),
+      onMute: () => toggleMute(),
+      onVolumeUp: () => {
+        setVolume((v) => {
+          const next = Math.min(1, Math.round((v + 0.1) * 100) / 100);
+          if (next > 0) setMuted(false);
+          return next;
+        });
+      },
+      onVolumeDown: () => {
+        setVolume((v) => Math.max(0, Math.round((v - 0.1) * 100) / 100));
+      },
+      onShowLyrics: () => {
+        setQueueOpen(false);
+        setLyricsOpen(true);
+      },
+      onHideLyrics: () => {
+        setLyricsOpen(false);
+      },
+      onFavorite: async () => {
+        const track = current;
+        if (!track) {
+          await invoke("voice_speak", { text: "当前没有在播放的歌曲" });
+          return;
+        }
+        const key = favKey(track);
+        if (favoriteKeys.has(key)) {
+          await invoke("voice_speak", { text: "这首歌已经在收藏里了" });
+          return;
+        }
+        await api.addFavorite(track);
+        await refreshFavorites();
+      },
+      onUnfavorite: async () => {
+        const track = current;
+        if (!track) {
+          await invoke("voice_speak", { text: "当前没有在播放的歌曲" });
+          return;
+        }
+        const key = favKey(track);
+        if (!favoriteKeys.has(key)) {
+          await invoke("voice_speak", { text: "这首歌还没有收藏" });
+          return;
+        }
+        await api.removeFavorite(track.provider, track.id);
+        await refreshFavorites();
+      },
+      onSearchPlay: (query, provider) => voiceSearchPlay(query, provider),
+      onThemePlay: (query, provider, limit) =>
+        voiceThemePlay(query, provider, limit),
+      onAppendTracks: (count) => voiceAppendTracks(count),
+      onProviderPlay: (provider) => voiceProviderPlay(provider),
+      onSwitchProvider: (provider) => voiceSwitchProvider(provider),
+      onShuffle: () => toggleShuffle(),
+      onRepeat: () => cycleRepeat(),
+      onClearQueue: () => clearQueueKeepCurrent(),
+      onShowQueue: () => {
+        setLyricsOpen(false);
+        setQueueOpen(true);
+      },
+      onWhatsPlaying: () => voiceWhatsPlaying(),
+      onPlayFavorites: () => voicePlayFavorites(),
+      onStatus: (status, detail) => setVoiceUi({ status, detail }),
+      onMusicHold: onVoiceMusicHold,
+    });
+  }, [
+    playNext,
+    playPrev,
+    togglePlay,
+    toggleMute,
+    onVoiceMusicHold,
+    voiceSearchPlay,
+    voiceThemePlay,
+    voiceAppendTracks,
+    voiceProviderPlay,
+    voiceSwitchProvider,
+    toggleShuffle,
+    cycleRepeat,
+    clearQueueKeepCurrent,
+    voiceWhatsPlaying,
+    voicePlayFavorites,
+    current,
+    favoriteKeys,
+    refreshFavorites,
+  ]);
+
+  useEffect(() => {
+    const assistant = voiceRef.current;
+    if (!assistant) return;
+    if (voiceEnabled) {
+      void assistant.start().catch((e) => {
+        console.error("voice assistant failed to start", e);
+        setVoiceUi({ status: "error", detail: String(e) });
+        setVoiceEnabled(false);
+        writeVoiceEnabled(false);
+      });
+    } else {
+      void assistant.stop();
+      setVoiceUi({ status: "off", detail: "" });
+    }
+  }, [voiceEnabled]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -920,8 +1662,6 @@ function App() {
 
   return (
     <div className={`app ${mini ? "mini" : ""}`}>
-      {!mini ? (
-        <>
       <aside className={`sidebar ${dragSourceId ? "is-sorting-sources" : ""}`}>
         <div className="brand">
           <BrandMark className="brand-mark" size={42} />
@@ -1123,6 +1863,20 @@ function App() {
             onProviderId={setProviderId}
             autoSkip={autoSkip}
             onAutoSkip={setAutoSkip}
+            voiceEnabled={voiceEnabled}
+            onVoiceEnabled={onVoiceEnabled}
+            voiceStatusText={
+              voiceEnabled
+                ? voiceUi.detail ||
+                  (voiceUi.status === "listening"
+                    ? "正在聆听「小栈小栈」"
+                    : voiceUi.status === "awake"
+                      ? "在呢"
+                      : voiceUi.status === "error"
+                        ? "启动失败"
+                        : "准备中…")
+                : undefined
+            }
             active={nav === "settings"}
             onUpdateAvailable={(u) => {
               if (u) setPendingUpdate(u);
@@ -1130,7 +1884,25 @@ function App() {
           />
         </div>
       </main>
-        </>
+
+      {voiceEnabled && voiceUi.status !== "off" && voiceUi.status !== "stopped" ? (
+        <div
+          className={`voice-pill ${
+            voiceUi.status === "awake" || voiceUi.status === "speaking" ? "awake" : ""
+          } ${voiceUi.status === "error" ? "error" : ""}`}
+          role="status"
+        >
+          <i aria-hidden />
+          <span>
+            {voiceUi.status === "speaking"
+              ? voiceUi.detail || "…"
+              : voiceUi.status === "awake"
+                ? "请说指令…"
+                : voiceUi.status === "error"
+                  ? voiceUi.detail || "语音助手出错"
+                  : voiceUi.detail || "小栈聆听中"}
+          </span>
+        </div>
       ) : null}
 
       <PlaylistPicker

@@ -103,7 +103,7 @@ export function SongList({
             : `继续播放 ${t.title}`
           : `播放 ${t.title}`;
 
-        const onCoverClick = () => {
+        const playThis = () => {
           if (active && onTogglePlay) {
             onTogglePlay();
             return;
@@ -113,12 +113,20 @@ export function SongList({
 
         return (
           <li
-            key={key}
+            key={`${key}-${i}`}
             className={`song-row ${active ? "active" : ""} ${active && playing ? "playing" : ""} ${hideProvider ? "no-src" : ""}`}
+            role="button"
+            tabIndex={0}
             onClick={(e) => {
               const el = e.target as HTMLElement;
               if (el.closest(".row-actions, .cover-btn")) return;
-              onCoverClick();
+              playThis();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                playThis();
+              }
             }}
           >
             <span className="idx">
@@ -130,7 +138,10 @@ export function SongList({
             </span>
             <button
               className="cover-btn"
-              onClick={onCoverClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                playThis();
+              }}
               type="button"
               title={coverTitle}
             >
