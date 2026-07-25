@@ -82,6 +82,7 @@ body,
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
+  color-scheme: dark;
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.45;
@@ -485,7 +486,6 @@ button {
   min-height: 0;
   overflow: hidden;
   padding: 28px 36px 24px;
-  animation: fadeIn 0.18s ease both;
 }
 
 .panel {
@@ -2354,10 +2354,17 @@ button {
   overflow: hidden;
 }
 
-/* Keep views mounted in mini so search/favorites state survives collapse. */
+/* Keep views mounted in mini so search/favorites state survives collapse.
+   Prefer off-flow hide over display:none to avoid a paint flash on restore. */
 .app.mini .sidebar,
 .app.mini .main {
-  display: none;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .app.mini .player {

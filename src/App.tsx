@@ -250,6 +250,13 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // Match app chrome so resize / mini expand never flashes system white.
+    void getCurrentWindow()
+      .setBackgroundColor("#141210")
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     // Restore mini geometry, or keep normal-mode floor after allowing smaller mini window in conf.
     const win = getCurrentWindow();
     if (localStorage.getItem("yinzhan-mini") === "1") {
@@ -732,22 +739,32 @@ function App() {
 
   const toggleMini = useCallback(async () => {
     const win = getCurrentWindow();
+    const nextPaint = () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+
     try {
       if (!mini) {
+        // Collapse: switch to mini layout first, then shrink.
         const size = await win.innerSize();
         const factor = await win.scaleFactor();
         normalSizeRef.current = {
           width: Math.round(size.width / factor),
           height: Math.round(size.height / factor),
         };
-        await win.setMinSize(new LogicalSize(360, 88));
-        await win.setSize(new LogicalSize(MINI_SIZE.width, MINI_SIZE.height));
-        await win.setAlwaysOnTop(true);
         setQueueOpen(false);
         setLyricsOpen(false);
         setMini(true);
         localStorage.setItem("yinzhan-mini", "1");
+        await nextPaint();
+        await win.setMinSize(new LogicalSize(360, 88));
+        await win.setSize(new LogicalSize(MINI_SIZE.width, MINI_SIZE.height));
+        await win.setAlwaysOnTop(true);
       } else {
+        // Expand: restore size first (dark window bg), then show full chrome.
         await win.setAlwaysOnTop(false);
         await win.setMinSize(new LogicalSize(NORMAL_MIN.width, NORMAL_MIN.height));
         await win.setSize(
