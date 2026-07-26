@@ -566,6 +566,17 @@ button {
   white-space: nowrap;
 }
 
+.settings-provider-health {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.settings-provider-health .settings-cache-row {
+  align-items: flex-start;
+}
+
 .settings-block {
   margin-top: 28px;
   padding-top: 20px;
@@ -1627,6 +1638,11 @@ button {
   flex-direction: column;
   gap: 4px;
   width: 100%;
+}
+
+.song-list.virtual {
+  /* Padding used as virtualization spacers; keep gap for visible rows only. */
+  box-sizing: content-box;
 }
 
 .list-dim {

@@ -1,5 +1,6 @@
 use crate::models::{
-    FavoriteItem, Playability, Playlist, PlaylistTrackItem, SearchHistoryItem, Track,
+    FavoriteItem, PlayHistoryItem, Playability, Playlist, PlaylistTrackItem, SearchHistoryItem,
+    Track,
 };
 use directories::ProjectDirs;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -69,6 +70,14 @@ impl Database {
                 position INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(playlist_id, provider, track_id),
                 FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS play_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                track_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                played_at TEXT NOT NULL,
+                UNIQUE(provider, track_id)
             );
             "#,
         )?;
@@ -344,6 +353,63 @@ impl Database {
             "UPDATE playlists SET updated_at = ?1 WHERE id = ?2",
             params![now, playlist_id],
         )?;
+        Ok(())
+    }
+
+    /// Upsert a track as recently played; keep at most 200 rows.
+    pub fn add_play_history(&self, track: &Track) -> Result<(), DbError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let payload = serde_json::to_string(track)?;
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            r#"
+            INSERT INTO play_history (provider, track_id, payload, played_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(provider, track_id) DO UPDATE SET
+              payload = excluded.payload,
+              played_at = excluded.played_at
+            "#,
+            params![track.provider, track.id, payload, now],
+        )?;
+        conn.execute(
+            r#"
+            DELETE FROM play_history WHERE id NOT IN (
+              SELECT id FROM play_history ORDER BY played_at DESC LIMIT 200
+            )
+            "#,
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_play_history(&self, limit: i64) -> Result<Vec<PlayHistoryItem>, DbError> {
+        let limit = limit.clamp(1, 200);
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, payload, played_at FROM play_history ORDER BY played_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            let id: i64 = row.get(0)?;
+            let payload: String = row.get(1)?;
+            let played_at: String = row.get(2)?;
+            Ok((id, payload, played_at))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, payload, played_at) = row?;
+            let track: Track = serde_json::from_str(&payload)?;
+            out.push(PlayHistoryItem {
+                id,
+                track,
+                played_at,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn clear_play_history(&self) -> Result<(), DbError> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute("DELETE FROM play_history", [])?;
         Ok(())
     }
 }

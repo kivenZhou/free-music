@@ -101,8 +101,9 @@ export interface VoiceHandlers {
    */
   onMusicHold?: (hold: boolean, resume?: boolean) => void;
   /**
-   * Soft-duck playback while listening for the wake word (laptop mics hear speakers).
-   * factor 1 = normal; mild reduction while listening.
+   * Soft-duck is only used during brief TTS echo windows if needed.
+   * Do NOT duck while idle-listening for wake — that made music stay quiet
+   * the whole time voice assistant was on.
    */
   onMusicDuck?: (factor: number) => void;
 }
@@ -378,14 +379,30 @@ function matchAction(norm: string): VoiceAction | null {
   ) {
     return "whats_playing";
   }
+  // Local favorites → queue, never online search for「收藏里面的音乐」.
   if (
-    /播放(?:我的)?收藏|来点收藏|听(?:我的)?收藏|打开收藏播放|播放收藏(?:夹|列表|的歌)?/.test(
+    !/取消收藏|移除收藏|不收藏|加入收藏|添加到收藏|收藏这首|收藏当前|收藏一下|帮我收藏|喜欢这首/.test(
       norm,
-    )
+    ) &&
+    (/(?:播放|放|听|来点|打开)(?:一下)?(?:我的)?收藏/.test(norm) ||
+      /从收藏(?:夹|列表)?(?:里|里面)?(?:播放|放|听)/.test(norm) ||
+      /把收藏(?:夹|列表)?(?:里|里面)?的?(?:歌|音乐|歌曲)?(?:都)?(?:拿出来)?(?:播放|放)/.test(
+        norm,
+      ) ||
+      /收藏(?:夹|列表)?(?:里|里面)的(?:歌|音乐|歌曲|曲子)?/.test(norm) ||
+      /^(?:播放|放)(?:我的)?收藏(?:夹|列表)?$/.test(norm))
   ) {
     return "play_favorites";
   }
   return null;
+}
+
+/** Query that only names the local favorites library (not a song title). */
+function isFavoritesLibraryQuery(q: string): boolean {
+  if (!q) return false;
+  return /^(?:我的)?收藏(?:夹|列表)?(?:里|里面)?(?:的)?(?:歌|音乐|歌曲|曲子)?$/.test(
+    q,
+  );
 }
 
 const THEME_RE =
@@ -489,7 +506,8 @@ function extractSearchPlay(norm: string): string | null {
       q = raw.replace(/(?:谢谢你|谢谢)$/g, "").trim();
     }
     if (q.length < 1) continue;
-    if (matchAction(q)) continue;
+    if (isFavoritesLibraryQuery(q) || isFavoritesLibraryQuery(raw)) continue;
+    if (matchAction(q) || matchAction(norm)) continue;
     if (/^(?:下一首|上一首|暂停|继续|静音)$/.test(q)) continue;
     return q;
   }
@@ -571,6 +589,14 @@ export function parseVoiceText(text: string, awake: boolean): VoiceIntent | null
     return null;
   }
 
+  // Commands like「播放收藏里面的音乐」must beat generic search/theme play.
+  const action = matchAction(rest);
+  if (action) {
+    if (woke) return { kind: "wake_and_command", action };
+    if (awake) return { kind: "command", action };
+    return null;
+  }
+
   // IMPORTANT: 「播放七里香」must be search, not bare「播放」.
   const query = extractSearchPlay(rest);
   if (query) {
@@ -581,13 +607,6 @@ export function parseVoiceText(text: string, awake: boolean): VoiceIntent | null
     }
     if (woke) return { kind: "wake_and_search_play", query };
     if (awake) return { kind: "search_play", query };
-    return null;
-  }
-
-  const action = matchAction(rest);
-  if (action) {
-    if (woke) return { kind: "wake_and_command", action };
-    if (awake) return { kind: "command", action };
     return null;
   }
 
@@ -603,6 +622,13 @@ function modelLabelToIntent(
 ): VoiceIntent | null {
   if (!woke && !awake) return null;
   if (label === "none") return null;
+
+  // Rules may have missed after ASR noise; still prefer local favorites.
+  const favAction = matchAction(rest);
+  if (favAction === "play_favorites" || label === "play_favorites") {
+    if (woke) return { kind: "wake_and_command", action: "play_favorites" };
+    return { kind: "command", action: "play_favorites" };
+  }
 
   if (label === "provider_play") {
     const scoped = parseProviderScoped(rest);
@@ -893,7 +919,7 @@ export class VoiceAssistant {
     }
     this.utteranceBuf = "";
     this.endMusicHold(false);
-    this.setListenDuck(false);
+    this.restoreFullVolume();
     this.stopWeb();
     if (this.unlistenTranscript) {
       this.unlistenTranscript();
@@ -967,7 +993,7 @@ export class VoiceAssistant {
         "listening",
         `可以说「${VOICE_WAKE_WORD}」`,
       );
-      this.setListenDuck(true);
+      this.restoreFullVolume();
       await invoke("report_voice_web_status", {
         status: "listening",
         detail: VOICE_WAKE_WORD,
@@ -1000,7 +1026,6 @@ export class VoiceAssistant {
   private mapStatus(status: string, detail: string) {
     if (!this.running && status !== "stopped") return;
     if (status === "speaking") {
-      this.setListenDuck(false);
       this.handlers.onStatus?.(
         "speaking",
         detail || VOICE_WAKE_REPLY,
@@ -1009,7 +1034,8 @@ export class VoiceAssistant {
     }
     if (status === "listening" || status === "starting") {
       if (status === "listening" && this.isAwake()) return;
-      if (status === "listening") this.setListenDuck(true);
+      // Idle listen must not duck music — that made volume stay tiny while voice was on.
+      if (status === "listening" && !this.holdingMusic) this.restoreFullVolume();
       this.handlers.onStatus?.(
         status === "starting" ? "starting" : "listening",
         detail || `可以说「${VOICE_WAKE_WORD}」`,
@@ -1017,20 +1043,19 @@ export class VoiceAssistant {
       return;
     }
     if (status === "awake") {
-      this.setListenDuck(false);
       this.handlers.onStatus?.("awake", detail || VOICE_WAKE_REPLY);
       return;
     }
     if (status === "error") {
-      this.setListenDuck(false);
       this.endMusicHold(false);
+      this.restoreFullVolume();
       this.handlers.onStatus?.("error", detail || "语音助手出错");
       return;
     }
     if (status === "stopped") {
       this.running = false;
       this.endMusicHold(false);
-      this.setListenDuck(false);
+      this.restoreFullVolume();
       this.handlers.onStatus?.("stopped", detail);
     }
   }
@@ -1049,17 +1074,12 @@ export class VoiceAssistant {
     const shouldResume = resume && !this.suppressResume;
     this.suppressResume = false;
     this.handlers.onMusicHold?.(false, shouldResume);
-    // Resuming into wake-word listening — keep speakers quieter for the mic.
-    if (this.running && resume) this.setListenDuck(true);
+    this.restoreFullVolume();
   }
 
-  private setListenDuck(active: boolean) {
-    if (this.holdingMusic) {
-      this.handlers.onMusicDuck?.(1);
-      return;
-    }
-    // Stronger duck while waiting for wake — laptop mics easily hear the speakers.
-    this.handlers.onMusicDuck?.(active ? 0.28 : 1);
+  /** Always restore full playback level when not in an active hold. */
+  private restoreFullVolume() {
+    this.handlers.onMusicDuck?.(1);
   }
 
   private scheduleCommandWindow(ms: number) {
@@ -1069,7 +1089,6 @@ export class VoiceAssistant {
       if (!this.running) return;
       if (Date.now() >= this.awakeUntil) {
         this.endMusicHold(true);
-        this.setListenDuck(true);
         this.handlers.onStatus?.(
           "listening",
           `可以说「${VOICE_WAKE_WORD}」`,
@@ -1107,13 +1126,14 @@ export class VoiceAssistant {
 
   private async speakAck(text: string) {
     this.handlers.onStatus?.("speaking", text);
-    this.ignoreUntil = Date.now() + 5000;
+    // Block only while TTS may echo — don't leave a long deaf window after.
+    this.ignoreUntil = Date.now() + 12_000;
     try {
       await invoke("voice_speak", { text });
     } catch {
       // ignore
     } finally {
-      this.ignoreUntil = Date.now() + 500;
+      this.ignoreUntil = Date.now() + 700;
     }
   }
 

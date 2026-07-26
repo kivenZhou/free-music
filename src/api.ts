@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Chart,
   FavoriteItem,
+  PlayHistoryItem,
   Playlist,
   PlaylistTrackItem,
   PlayUrl,
@@ -62,6 +63,10 @@ export const api = {
     invoke<void>("add_to_playlist", { playlistId, track }),
   removeFromPlaylist: (playlistId: number, provider: string, trackId: string) =>
     invoke<void>("remove_from_playlist", { playlistId, provider, trackId }),
+  addPlayHistory: (track: Track) => invoke<void>("add_play_history", { track }),
+  listPlayHistory: (limit = 100) =>
+    invoke<PlayHistoryItem[]>("list_play_history", { limit }),
+  clearPlayHistory: () => invoke<void>("clear_play_history"),
   voiceAssistantInfo: () => invoke<VoiceAssistantInfo>("voice_assistant_info"),
   startVoiceAssistant: () => invoke<void>("start_voice_assistant"),
   stopVoiceAssistant: () => invoke<void>("stop_voice_assistant"),

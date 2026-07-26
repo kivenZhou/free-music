@@ -52,6 +52,12 @@ export interface PlaylistTrackItem {
   addedAt: string;
 }
 
+export interface PlayHistoryItem {
+  id: number;
+  track: Track;
+  playedAt: string;
+}
+
 export interface ProviderInfo {
   id: string;
   name: string;
@@ -61,6 +67,7 @@ export type NavKey =
   | "charts"
   | "search"
   | "favorites"
+  | "history"
   | "playlists"
   | "settings";
 

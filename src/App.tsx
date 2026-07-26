@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -17,6 +17,7 @@ import {
 import { BrandMark } from "./components/BrandMark";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
+import { HistoryView } from "./components/HistoryView";
 import { LyricsPanel, mergeLyrics, type LyricLine } from "./components/LyricsPanel";
 import { PlayerBar } from "./components/PlayerBar";
 import { PlaylistPicker } from "./components/PlaylistPicker";
@@ -25,9 +26,25 @@ import { QueuePanel } from "./components/QueuePanel";
 import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { TrendingUp, Search, Heart, Settings, ListMusic, GripVertical } from "lucide-react";
+import {
+  TrendingUp,
+  Search,
+  Heart,
+  Settings,
+  ListMusic,
+  GripVertical,
+  History,
+} from "lucide-react";
+import { useMediaSession } from "./useMediaSession";
+import { usePlayer } from "./usePlayer";
+import {
+  readDisabledProviders,
+  readProviderHealth,
+  toggleProviderDisabled,
+  type ProviderHealthEntry,
+} from "./providerHealth";
 import type { Update } from "@tauri-apps/plugin-updater";
-import type { FavoriteItem, NavKey, ProviderInfo, RepeatMode, Track } from "./types";
+import type { FavoriteItem, NavKey, ProviderInfo, Track } from "./types";
 import { checkForInstallableUpdate } from "./updater";
 import {
   readVoiceEnabled,
@@ -47,14 +64,7 @@ import {
   MINI_SIZE,
   NORMAL_MIN,
   PROVIDER_ORDER_KEY,
-  QUEUE_STORAGE_KEY,
-  clampSeekTime,
   loadProviderOrder,
-  loadStoredQueue,
-  playbackDuration,
-  readStoredRepeat,
-  readStoredVolume,
-  shuffleTracks,
   sortProvidersByOrder,
 } from "./playerUtils";
 import {
@@ -68,38 +78,81 @@ import {
 import "./App.css";
 
 function App() {
-  const storedQueue = useMemo(() => loadStoredQueue(), []);
   const [nav, setNav] = useState<NavKey>("charts");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerId, setProviderId] = useState(
     () => localStorage.getItem("yinzhan-provider") || "netease",
   );
+  const [disabledProviders, setDisabledProviders] = useState(readDisabledProviders);
+  const [providerHealth, setProviderHealth] = useState<Record<string, ProviderHealthEntry>>(
+    readProviderHealth,
+  );
+  const [healthVersion, setHealthVersion] = useState(0);
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [favToken, setFavToken] = useState(0);
   const favoritesRef = useRef<FavoriteItem[]>([]);
   const [playlistToken, setPlaylistToken] = useState(0);
+  const [historyToken, setHistoryToken] = useState(0);
   const [playlistPickTrack, setPlaylistPickTrack] = useState<Track | null>(null);
 
-  const [queue, setQueue] = useState<Track[]>(() => storedQueue?.tracks ?? []);
-  const [queueIndex, setQueueIndex] = useState(() => storedQueue?.index ?? -1);
-  const [current, setCurrent] = useState<Track | null>(
-    () =>
-      storedQueue && storedQueue.index >= 0
-        ? storedQueue.tracks[storedQueue.index] ?? null
-        : null,
-  );
-  const [playing, setPlaying] = useState(false);
-  const [loadingPlay, setLoadingPlay] = useState(false);
-  const [playError, setPlayError] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const refreshProviderHealth = useCallback(() => {
+    setProviderHealth(readProviderHealth());
+    setHealthVersion((n) => n + 1);
+  }, []);
 
-  const [shuffle, setShuffle] = useState(
-    () => localStorage.getItem("yinzhan-shuffle") === "1",
-  );
-  const [repeatMode, setRepeatMode] = useState<RepeatMode>(readStoredRepeat);
-  const [volume, setVolume] = useState(readStoredVolume);
-  const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
+  const player = usePlayer({
+    onTrackStarted: () => setHistoryToken((n) => n + 1),
+    onHealthChange: refreshProviderHealth,
+  });
+  const {
+    queue,
+    queueIndex,
+    current,
+    playing,
+    loadingPlay,
+    playError,
+    setPlayError,
+    progress,
+    duration,
+    setProgress,
+    shuffle,
+    repeatMode,
+    volume,
+    muted,
+    autoSkip,
+    currentKey,
+    hasPrev,
+    hasNext,
+    audioRef,
+    queueRef,
+    queueIndexRef,
+    playTrackAtRef,
+    ignoreEndedUntilRef,
+    playTrackAt,
+    playFromList,
+    playAll,
+    enqueueNext,
+    addToQueue,
+    removeFromQueue,
+    clearQueueKeepCurrent,
+    playPrev,
+    playPrevTrack,
+    playNext,
+    togglePlay,
+    onSeek,
+    seekToSeconds,
+    toggleShuffle,
+    cycleRepeat,
+    setVolume: setVolumeSafe,
+    setVolumeLevel,
+    setMuted,
+    toggleMute,
+    setAutoSkip,
+    setQueue,
+    onVoiceMusicDuck,
+    onVoiceMusicHold,
+  } = player;
+
   const [voiceEnabled, setVoiceEnabled] = useState(readVoiceEnabled);
   const [hotkeysEnabled, setHotkeysEnabled] = useState(readHotkeysEnabled);
   const [hotkeyMap, setHotkeyMap] = useState(readHotkeyMap);
@@ -109,9 +162,6 @@ function App() {
     detail: string;
   }>({ status: "off", detail: "" });
   const voiceRef = useRef<VoiceAssistant | null>(null);
-  const voiceHoldPlayingRef = useRef(false);
-  /** Soft-duck factor while voice assistant listens for wake word (1 = full). */
-  const voiceDuckRef = useRef(1);
   /** Last voice catalog feed — used by「追加N首」. */
   const voiceFeedRef = useRef<{
     mode: "search" | "chart" | "none";
@@ -129,9 +179,6 @@ function App() {
   const [mini, setMini] = useState(
     () => localStorage.getItem("yinzhan-mini") === "1",
   );
-  const [autoSkip, setAutoSkip] = useState(
-    () => localStorage.getItem("yinzhan-auto-skip") !== "0",
-  );
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
   const [dragOverSourceId, setDragOverSourceId] = useState<string | null>(null);
@@ -142,51 +189,7 @@ function App() {
     moved: boolean;
     pointerId: number;
   } | null>(null);
-
-  const queueReadyRef = useRef(false);
-
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const queueRef = useRef<Track[]>(storedQueue?.tracks ?? []);
-  const queueIndexRef = useRef(storedQueue?.index ?? -1);
-  const shuffleRef = useRef(false);
-  const repeatRef = useRef<RepeatMode>(readStoredRepeat());
-  const playGenRef = useRef(0);
-  const failSkipRef = useRef(0);
-  const autoSkipRef = useRef(true);
-  const ignoreEndedUntilRef = useRef(0);
-  const suppressTimeRef = useRef(false);
   const normalSizeRef = useRef({ width: 1180, height: 760 });
-  const playTrackAtRef = useRef<(tracks: Track[], index: number) => void>(() => undefined);
-  const advanceRef = useRef<(dir: 1 | -1, opts?: { fromEnded?: boolean }) => void>(
-    () => undefined,
-  );
-
-  const currentKey = current ? favKey(current) : null;
-  const hasPrev = queue.length > 0 && (queueIndex > 0 || repeatMode === "all" || shuffle);
-  const hasNext =
-    queue.length > 0 &&
-    (queueIndex < queue.length - 1 || repeatMode === "all" || repeatMode === "one" || shuffle);
-
-  useEffect(() => {
-    queueRef.current = queue;
-  }, [queue]);
-
-  useEffect(() => {
-    queueIndexRef.current = queueIndex;
-  }, [queueIndex]);
-
-  useEffect(() => {
-    shuffleRef.current = shuffle;
-  }, [shuffle]);
-
-  useEffect(() => {
-    repeatRef.current = repeatMode;
-  }, [repeatMode]);
-
-  useEffect(() => {
-    autoSkipRef.current = autoSkip;
-    localStorage.setItem("yinzhan-auto-skip", autoSkip ? "1" : "0");
-  }, [autoSkip]);
 
   // Quietly check for a signed installable update a few seconds after launch.
   useEffect(() => {
@@ -244,11 +247,14 @@ function App() {
     api.listProviders().then((ps) => {
       const ordered = sortProvidersByOrder(ps, loadProviderOrder());
       setProviders(ordered);
+      const disabled = readDisabledProviders();
+      const enabled = ordered.filter((p) => !disabled.has(p.id));
+      const pool = enabled.length > 0 ? enabled : ordered;
       const saved = localStorage.getItem("yinzhan-provider");
-      if (saved && ordered.some((p) => p.id === saved)) {
+      if (saved && pool.some((p) => p.id === saved)) {
         setProviderId(saved);
-      } else if (ordered[0]) {
-        setProviderId(ordered[0].id);
+      } else if (pool[0]) {
+        setProviderId(pool[0].id);
       }
     });
     refreshFavorites().catch(() => undefined);
@@ -257,6 +263,30 @@ function App() {
   useEffect(() => {
     localStorage.setItem("yinzhan-provider", providerId);
   }, [providerId]);
+
+  const pickableProviders = useMemo(() => {
+    const enabled = providers.filter((p) => !disabledProviders.has(p.id));
+    return enabled.length > 0 ? enabled : providers;
+  }, [providers, disabledProviders, healthVersion]);
+
+  useEffect(() => {
+    if (providers.length === 0) return;
+    if (!pickableProviders.some((p) => p.id === providerId) && pickableProviders[0]) {
+      setProviderId(pickableProviders[0].id);
+    }
+  }, [providers, pickableProviders, providerId]);
+
+  const onToggleProviderDisabled = useCallback(
+    (id: string) => {
+      setDisabledProviders(toggleProviderDisabled(id));
+      refreshProviderHealth();
+    },
+    [refreshProviderHealth],
+  );
+
+  useEffect(() => {
+    if (nav === "settings") refreshProviderHealth();
+  }, [nav, refreshProviderHealth]);
 
   const reorderProviders = useCallback((fromId: string, toId: string) => {
     if (fromId === toId) return;
@@ -293,30 +323,6 @@ function App() {
     setDragSourceId(null);
     setDragOverSourceId(null);
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem("yinzhan-shuffle", shuffle ? "1" : "0");
-  }, [shuffle]);
-
-  useEffect(() => {
-    localStorage.setItem("yinzhan-repeat-v2", repeatMode);
-  }, [repeatMode]);
-
-  useEffect(() => {
-    // Skip the first paint so we don't wipe a just-restored empty write.
-    if (!queueReadyRef.current) {
-      queueReadyRef.current = true;
-      return;
-    }
-    if (queue.length === 0) {
-      localStorage.removeItem(QUEUE_STORAGE_KEY);
-      return;
-    }
-    localStorage.setItem(
-      QUEUE_STORAGE_KEY,
-      JSON.stringify({ tracks: queue, index: queueIndex }),
-    );
-  }, [queue, queueIndex]);
 
   const lyricsNeeded = lyricsOpen || desktopLyricsOpen;
 
@@ -421,394 +427,6 @@ function App() {
     }
   }, [desktopLyricsOpen]);
 
-  const applyVolume = useCallback((vol: number, isMuted: boolean) => {
-    const audio = audioRef.current;
-    if (audio) audio.volume = isMuted ? 0 : vol * voiceDuckRef.current;
-  }, []);
-
-  const onVoiceMusicDuck = useCallback(
-    (factor: number) => {
-      voiceDuckRef.current = Math.min(1, Math.max(0.08, factor));
-      applyVolume(volume, muted);
-    },
-    [applyVolume, volume, muted],
-  );
-
-  const playTrackAt = useCallback(async (tracks: Track[], index: number) => {
-    const track = tracks[index];
-    const audio = audioRef.current;
-    if (!track || !audio) return;
-
-    const gen = ++playGenRef.current;
-    // New play attempt clears consecutive-fail lockout so manual clicks recover.
-    failSkipRef.current = 0;
-    setQueue(tracks);
-    setQueueIndex(index);
-    queueRef.current = tracks;
-    queueIndexRef.current = index;
-    setCurrent(track);
-    setLoadingPlay(true);
-    setPlaying(false);
-    setPlayError(null);
-    // Freeze timeupdate + hard-stop previous audio before any long resolve/download.
-    suppressTimeRef.current = true;
-    setProgress(0);
-    setDuration(track.durationMs ? track.durationMs / 1000 : 0);
-    try {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-    } catch {
-      // ignore
-    }
-
-    try {
-      const resolved = await api.resolvePlayUrl(track);
-      if (gen !== playGenRef.current) return;
-      // Prefer disk cache when warm; otherwise stream remote URL immediately.
-      const src = resolved.localPath
-        ? convertFileSrc(resolved.localPath)
-        : resolved.url;
-      if (!src) {
-        throw new Error("未获取到可播地址");
-      }
-      audio.src = src;
-      try {
-        await audio.play();
-      } catch {
-        // After TTS / device churn, first play() can fail — one hard retry.
-        if (gen !== playGenRef.current) return;
-        audio.load();
-        await audio.play();
-      }
-      if (gen !== playGenRef.current) return;
-      failSkipRef.current = 0;
-      suppressTimeRef.current = false;
-      setProgress(audio.currentTime || 0);
-    } catch (e) {
-      if (gen !== playGenRef.current) return;
-      suppressTimeRef.current = false;
-      setPlaying(false);
-      setPlayError(String(e).replace(/^Error:\s*/, ""));
-      const canAdvance = index < tracks.length - 1 || repeatRef.current === "all";
-      if (autoSkipRef.current && canAdvance && failSkipRef.current < 3) {
-        failSkipRef.current += 1;
-        window.setTimeout(() => {
-          if (gen === playGenRef.current) {
-            advanceRef.current(1);
-          }
-        }, 600);
-      } else if (autoSkipRef.current && failSkipRef.current >= 3) {
-        setPlayError("连续多首无法播放，已暂停");
-        failSkipRef.current = 0;
-      }
-    } finally {
-      if (gen === playGenRef.current) {
-        setLoadingPlay(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    playTrackAtRef.current = playTrackAt;
-  }, [playTrackAt]);
-
-  const advance = useCallback(
-    (dir: 1 | -1, opts?: { fromEnded?: boolean }) => {
-      const q = queueRef.current;
-      const i = queueIndexRef.current;
-      const mode = repeatRef.current;
-      if (q.length === 0 || i < 0) return;
-
-      // Auto-replay current track only when song ends in single-repeat mode
-      if (opts?.fromEnded && mode === "one") {
-        void playTrackAt(q, i);
-        return;
-      }
-
-      if (shuffleRef.current && q.length > 1) {
-        let next = Math.floor(Math.random() * q.length);
-        while (next === i) next = Math.floor(Math.random() * q.length);
-        void playTrackAt(q, next);
-        return;
-      }
-
-      let next = i + dir;
-      if (next < 0 || next >= q.length) {
-        if (mode === "all") {
-          next = (next + q.length) % q.length;
-        } else {
-          return;
-        }
-      }
-      void playTrackAt(q, next);
-    },
-    [playTrackAt],
-  );
-
-  useEffect(() => {
-    advanceRef.current = advance;
-  }, [advance]);
-
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
-    audio.volume = muted ? 0 : volume;
-    audioRef.current = audio;
-
-    const onTime = () => {
-      if (suppressTimeRef.current) return;
-      setProgress(audio.currentTime);
-    };
-    const onMeta = () => {
-      const d = playbackDuration(audio);
-      if (d > 0) setDuration(d);
-    };
-    const onDuration = () => {
-      const d = playbackDuration(audio);
-      if (d > 0) setDuration(d);
-    };
-    const onEnded = () => {
-      // Seeking past a wrong metadata end used to fire `ended` and skip tracks.
-      if (Date.now() < ignoreEndedUntilRef.current) return;
-      const dur = playbackDuration(audio);
-      if (dur > 0 && audio.currentTime < dur - 1.5) return;
-      setPlaying(false);
-      advanceRef.current(1, { fromEnded: true });
-    };
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onErr = () => {
-      const gen = playGenRef.current;
-      setPlaying(false);
-      if (!autoSkipRef.current) {
-        setPlayError("播放失败");
-        return;
-      }
-      setPlayError("播放失败，尝试下一首…");
-      if (failSkipRef.current >= 3) {
-        setPlayError("连续多首无法播放，已暂停");
-        failSkipRef.current = 0;
-        return;
-      }
-      failSkipRef.current += 1;
-      window.setTimeout(() => {
-        if (gen === playGenRef.current) {
-          advanceRef.current(1);
-        }
-      }, 500);
-    };
-
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("loadedmetadata", onMeta);
-    audio.addEventListener("durationchange", onDuration);
-    audio.addEventListener("ended", onEnded);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("error", onErr);
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("loadedmetadata", onMeta);
-      audio.removeEventListener("durationchange", onDuration);
-      audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("error", onErr);
-      audioRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    applyVolume(volume, muted);
-    localStorage.setItem("yinzhan-volume", String(volume));
-    localStorage.setItem("yinzhan-muted", muted ? "1" : "0");
-  }, [volume, muted, applyVolume]);
-
-  const onVoiceMusicHold = useCallback((hold: boolean, resume = true) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (hold) {
-      voiceHoldPlayingRef.current = !audio.paused;
-      if (!audio.paused) audio.pause();
-      return;
-    }
-    if (resume && voiceHoldPlayingRef.current) {
-      void audio.play().catch(() => undefined);
-    }
-    voiceHoldPlayingRef.current = false;
-  }, []);
-
-  const playFromList = useCallback(
-    (track: Track, list: Track[]) => {
-      const index = list.findIndex(
-        (t) => t.id === track.id && t.provider === track.provider,
-      );
-      const start = index >= 0 ? index : 0;
-      const ordered = shuffleRef.current ? shuffleTracks(list, start) : list;
-      const playIndex = shuffleRef.current ? 0 : start;
-      void playTrackAt(ordered, playIndex);
-    },
-    [playTrackAt],
-  );
-
-  const playAll = useCallback(
-    (list: Track[]) => {
-      if (list.length === 0) return;
-      const ordered = shuffleRef.current ? shuffleTracks(list, 0) : list;
-      void playTrackAt(ordered, 0);
-    },
-    [playTrackAt],
-  );
-
-  const enqueueNext = useCallback((track: Track) => {
-    const q = queueRef.current;
-    const i = queueIndexRef.current;
-    if (q.length === 0 || i < 0) {
-      void playTrackAtRef.current([track], 0);
-      return;
-    }
-    const next = [...q.slice(0, i + 1), track, ...q.slice(i + 1)];
-    setQueue(next);
-    queueRef.current = next;
-  }, []);
-
-  const addToQueue = useCallback((track: Track) => {
-    const q = queueRef.current;
-    if (q.length === 0 || queueIndexRef.current < 0) {
-      void playTrackAtRef.current([track], 0);
-      return;
-    }
-    const next = [...q, track];
-    setQueue(next);
-    queueRef.current = next;
-  }, []);
-
-  const removeFromQueue = useCallback(
-    (index: number) => {
-      const q = queueRef.current;
-      const i = queueIndexRef.current;
-      if (index < 0 || index >= q.length) return;
-
-      const next = q.filter((_, idx) => idx !== index);
-      if (next.length === 0) {
-        const audio = audioRef.current;
-        if (audio) {
-          audio.pause();
-          audio.removeAttribute("src");
-          audio.load();
-        }
-        setQueue([]);
-        setQueueIndex(-1);
-        queueRef.current = [];
-        queueIndexRef.current = -1;
-        setCurrent(null);
-        setPlaying(false);
-        setProgress(0);
-        setDuration(0);
-        return;
-      }
-
-      if (index === i) {
-        const newIndex = Math.min(index, next.length - 1);
-        void playTrackAt(next, newIndex);
-        return;
-      }
-
-      const newIndex = index < i ? i - 1 : i;
-      setQueue(next);
-      setQueueIndex(newIndex);
-      queueRef.current = next;
-      queueIndexRef.current = newIndex;
-    },
-    [playTrackAt],
-  );
-
-  const clearQueueKeepCurrent = useCallback(() => {
-    const q = queueRef.current;
-    const i = queueIndexRef.current;
-    if (i < 0 || !q[i]) {
-      setQueue([]);
-      setQueueIndex(-1);
-      queueRef.current = [];
-      queueIndexRef.current = -1;
-      return;
-    }
-    const only = [q[i]];
-    setQueue(only);
-    setQueueIndex(0);
-    queueRef.current = only;
-    queueIndexRef.current = 0;
-  }, []);
-
-  /** UI / media-key prev: restart current if already past ~3s (common player UX). */
-  const playPrev = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio && audio.currentTime > 3) {
-      audio.currentTime = 0;
-      setProgress(0);
-      return;
-    }
-    advance(-1);
-  }, [advance]);
-
-  /** Voice「上一首」: always go to the previous track. */
-  const playPrevTrack = useCallback(() => {
-    advance(-1);
-  }, [advance]);
-
-  const playNext = useCallback(() => {
-    advance(1);
-  }, [advance]);
-
-  const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !current) return;
-    if (audio.paused) {
-      // After restart the queue is restored but audio.src is empty.
-      if (!audio.getAttribute("src") && queueRef.current.length > 0 && queueIndexRef.current >= 0) {
-        void playTrackAtRef.current(queueRef.current, queueIndexRef.current);
-        return;
-      }
-      void audio.play().catch(() => setPlayError("无法继续播放"));
-    } else {
-      audio.pause();
-    }
-  }, [current]);
-
-  const onSeek = useCallback(
-    (ratio: number) => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      const dur = playbackDuration(audio, current?.durationMs);
-      if (dur <= 0) return;
-      const target = clampSeekTime(audio, dur * Math.min(1, Math.max(0, ratio)));
-      ignoreEndedUntilRef.current = Date.now() + 800;
-      try {
-        audio.currentTime = target;
-        setProgress(target);
-      } catch {
-        // Some streams reject seeks; don't advance the queue.
-      }
-    },
-    [current],
-  );
-
-  const seekToSeconds = useCallback((sec: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const target = clampSeekTime(audio, sec);
-    ignoreEndedUntilRef.current = Date.now() + 800;
-    try {
-      audio.currentTime = target;
-      setProgress(target);
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const toggleMini = useCallback(async () => {
     const win = getCurrentWindow();
     const nextPaint = () =>
@@ -848,7 +466,7 @@ function App() {
     } catch (e) {
       setPlayError(String(e).replace(/^Error:\s*/, ""));
     }
-  }, [mini]);
+  }, [mini, setPlayError]);
 
   const toggleFavorite = useCallback(
     async (track: Track) => {
@@ -862,34 +480,6 @@ function App() {
     },
     [favoriteKeys, refreshFavorites],
   );
-
-  const toggleShuffle = useCallback(() => {
-    setShuffle((on) => {
-      const next = !on;
-      if (next && queueRef.current.length > 1 && queueIndexRef.current >= 0) {
-        const reshuffled = shuffleTracks(queueRef.current, queueIndexRef.current);
-        setQueue(reshuffled);
-        setQueueIndex(0);
-        queueRef.current = reshuffled;
-        queueIndexRef.current = 0;
-      }
-      return next;
-    });
-  }, []);
-
-  const cycleRepeat = useCallback(() => {
-    setRepeatMode((m) => (m === "off" ? "all" : m === "all" ? "one" : "off"));
-  }, []);
-
-  const setVolumeSafe = useCallback((v: number) => {
-    const clamped = Math.min(1, Math.max(0, v));
-    setVolume(clamped);
-    if (clamped > 0) setMuted(false);
-  }, []);
-
-  const toggleMute = useCallback(() => {
-    setMuted((m) => !m);
-  }, []);
 
   const onVoiceEnabled = useCallback((on: boolean) => {
     setVoiceEnabled(on);
@@ -954,8 +544,7 @@ function App() {
     }
     const next = [...q, ...fresh];
     setQueue(next);
-    queueRef.current = next;
-  }, []);
+  }, [setQueue]);
 
   /** Append one track to the queue and start playing it (keeps existing queue). */
   const playOrAppendOne = useCallback((track: Track) => {
@@ -972,9 +561,8 @@ function App() {
     }
     const next = [...q, track];
     setQueue(next);
-    queueRef.current = next;
     void playTrackAtRef.current(next, next.length - 1);
-  }, []);
+  }, [setQueue]);
 
   const voiceSearchPlay = useCallback(
     async (query: string, provider?: string) => {
@@ -1227,10 +815,19 @@ function App() {
     [playAll],
   );
 
-  const voiceSwitchProvider = useCallback((provider: string) => {
-    setProviderId(provider);
-    setNav("charts");
-  }, []);
+  const voiceSwitchProvider = useCallback(
+    (provider: string) => {
+      if (disabledProviders.has(provider)) {
+        void invoke("voice_speak", {
+          text: `${providerLabel(provider)}已在设置里禁用，请先启用`,
+        });
+        return;
+      }
+      setProviderId(provider);
+      setNav("charts");
+    },
+    [disabledProviders],
+  );
 
   const voicePlayFavorites = useCallback(async () => {
     try {
@@ -1241,12 +838,17 @@ function App() {
           .filter((t) => t.playability !== "unavailable"),
       );
       if (!tracks.length) {
+        setNav("favorites");
         await invoke("voice_speak", { text: "收藏夹还是空的" });
         return;
       }
       voiceFeedRef.current = { mode: "none", offset: 0 };
+      setNav("favorites");
+      // Replace the play queue with favorites — same as「播放全部」on the Favorites page.
       playAll(tracks);
-      await invoke("voice_speak", { text: `为你播放收藏里的${tracks.length}首歌` });
+      await invoke("voice_speak", {
+        text: `好的，已把收藏里的${tracks.length}首歌加入播放列表`,
+      });
     } catch (e) {
       console.error("voice play favorites failed", e);
       await invoke("voice_speak", { text: "打开收藏失败" });
@@ -1291,14 +893,14 @@ function App() {
       onToggle: () => togglePlay(),
       onMute: () => toggleMute(),
       onVolumeUp: () => {
-        setVolume((v) => {
+        setVolumeLevel((v) => {
           const next = Math.min(1, Math.round((v + 0.1) * 100) / 100);
           if (next > 0) setMuted(false);
           return next;
         });
       },
       onVolumeDown: () => {
-        setVolume((v) => Math.max(0, Math.round((v - 0.1) * 100) / 100));
+        setVolumeLevel((v) => Math.max(0, Math.round((v - 0.1) * 100) / 100));
       },
       onShowLyrics: () => {
         setQueueOpen(false);
@@ -1359,6 +961,8 @@ function App() {
     playPrevTrack,
     togglePlay,
     toggleMute,
+    setVolumeLevel,
+    setMuted,
     onVoiceMusicHold,
     onVoiceMusicDuck,
     voiceSearchPlay,
@@ -1503,67 +1107,17 @@ function App() {
     };
   }, [hotkeysEnabled, hotkeyMap]);
 
-  useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-
-    if (!current) {
-      navigator.mediaSession.metadata = null;
-      return;
-    }
-
-    const artwork = current.coverUrl
-      ? [{ src: current.coverUrl, sizes: "300x300", type: "image/jpeg" }]
-      : [];
-
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: current.title,
-      artist: current.artist,
-      album: current.album ?? providerLabel(current.provider),
-      artwork,
-    });
-    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
-  }, [current, playing]);
-
-  useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-
-    const setHandler = (
-      action: MediaSessionAction,
-      handler: MediaSessionActionHandler | null,
-    ) => {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch {
-        // unsupported action on this platform
-      }
-    };
-
-    setHandler("play", () => {
-      const audio = audioRef.current;
-      if (audio) void audio.play().catch(() => undefined);
-    });
-    setHandler("pause", () => {
-      audioRef.current?.pause();
-    });
-    setHandler("previoustrack", () => playPrev());
-    setHandler("nexttrack", () => playNext());
-    setHandler("seekto", (details) => {
-      const audio = audioRef.current;
-      if (!audio || details.seekTime == null) return;
-      const target = clampSeekTime(audio, details.seekTime);
-      ignoreEndedUntilRef.current = Date.now() + 800;
-      audio.currentTime = target;
-      setProgress(target);
-    });
-
-    return () => {
-      setHandler("play", null);
-      setHandler("pause", null);
-      setHandler("previoustrack", null);
-      setHandler("nexttrack", null);
-      setHandler("seekto", null);
-    };
-  }, [playPrev, playNext]);
+  useMediaSession({
+    current,
+    playing,
+    progress,
+    duration,
+    audioRef,
+    ignoreEndedUntilRef,
+    onPrev: playPrev,
+    onNext: playNext,
+    onProgress: setProgress,
+  });
 
   const navItems = useMemo(
     () =>
@@ -1571,6 +1125,7 @@ function App() {
         { key: "charts" as const, label: "榜单", en: "Charts", icon: TrendingUp },
         { key: "search" as const, label: "搜索", en: "Search", icon: Search },
         { key: "favorites" as const, label: "收藏", en: "Saved", icon: Heart },
+        { key: "history" as const, label: "最近", en: "Recent", icon: History },
         { key: "playlists" as const, label: "歌单", en: "Lists", icon: ListMusic },
         { key: "settings" as const, label: "设置", en: "Prefs", icon: Settings },
       ] as const,
@@ -1620,7 +1175,7 @@ function App() {
                 role="list"
                 ref={sourceListRef}
               >
-                {providers.map((p) => (
+                {pickableProviders.map((p) => (
                   <div
                     key={p.id}
                     role="listitem"
@@ -1732,7 +1287,7 @@ function App() {
             favoriteKeys={favoriteKeys}
             currentKey={currentKey}
             playing={playing}
-            providers={providers}
+            providers={pickableProviders}
             onPlay={playFromList}
             onTogglePlay={togglePlay}
             onPlayAll={playAll}
@@ -1757,6 +1312,22 @@ function App() {
             refreshToken={favToken}
           />
         </div>
+        <div className={`view-pane ${nav === "history" ? "on" : ""}`}>
+          <HistoryView
+            favoriteKeys={favoriteKeys}
+            currentKey={currentKey}
+            playing={playing}
+            onPlay={playFromList}
+            onTogglePlay={togglePlay}
+            onPlayAll={playAll}
+            onPlayNext={enqueueNext}
+            onAddToQueue={addToQueue}
+            onAddToPlaylist={setPlaylistPickTrack}
+            onToggleFavorite={toggleFavorite}
+            refreshToken={historyToken}
+            active={nav === "history"}
+          />
+        </div>
         <div className={`view-pane ${nav === "playlists" ? "on" : ""}`}>
           <PlaylistsView
             favoriteKeys={favoriteKeys}
@@ -1778,6 +1349,10 @@ function App() {
             providers={providers}
             providerId={providerId}
             onProviderId={setProviderId}
+            disabledProviders={disabledProviders}
+            providerHealth={providerHealth}
+            onToggleProviderDisabled={onToggleProviderDisabled}
+            onRefreshHealth={refreshProviderHealth}
             autoSkip={autoSkip}
             onAutoSkip={setAutoSkip}
             voiceEnabled={voiceEnabled}

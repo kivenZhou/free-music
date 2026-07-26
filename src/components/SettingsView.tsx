@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { api, formatBytes, type CacheStats } from "../api";
 import type { ProviderInfo } from "../types";
+import type { ProviderHealthEntry } from "../providerHealth";
 import {
   DEFAULT_HOTKEYS,
   HOTKEY_LABELS,
@@ -32,6 +33,10 @@ interface Props {
   hotkeyMap: Record<HotkeyAction, string>;
   onHotkeyMap: (map: Record<HotkeyAction, string>) => void;
   hotkeyWarning?: string;
+  disabledProviders: Set<string>;
+  providerHealth: Record<string, ProviderHealthEntry>;
+  onToggleProviderDisabled: (id: string) => void;
+  onRefreshHealth?: () => void;
   active?: boolean;
   onUpdateAvailable?: (update: Update | null) => void;
 }
@@ -50,6 +55,10 @@ export function SettingsView({
   hotkeyMap,
   onHotkeyMap,
   hotkeyWarning,
+  disabledProviders,
+  providerHealth,
+  onToggleProviderDisabled,
+  onRefreshHealth,
   active = true,
   onUpdateAvailable,
 }: Props) {
@@ -153,7 +162,8 @@ export function SettingsView({
     }
   }
 
-  const chartProviders = providers;
+  const chartProviders = providers.filter((p) => !disabledProviders.has(p.id));
+  const settingsProviders = chartProviders.length > 0 ? chartProviders : providers;
   const pct =
     progress && progress.total && progress.total > 0
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
@@ -178,7 +188,7 @@ export function SettingsView({
           <h2>默认音源</h2>
           <p className="settings-desc">榜单页默认使用的音源（可随时在侧栏切换）</p>
           <div className="settings-chips">
-            {chartProviders.map((p) => (
+            {settingsProviders.map((p) => (
               <button
                 key={p.id}
                 type="button"
@@ -189,6 +199,45 @@ export function SettingsView({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="settings-block">
+          <h2>音源状态</h2>
+          <p className="settings-desc">
+            各音源成功/失败次数与最近错误；禁用后不会在榜单与搜索筛选中出现
+          </p>
+          <div className="settings-provider-health">
+            {providers.map((p) => {
+              const health = providerHealth[p.id];
+              const disabled = disabledProviders.has(p.id);
+              const lastErr = health?.lastError;
+              return (
+                <div key={p.id} className="settings-cache-row">
+                  <div className="settings-cache-stat">
+                    <strong>{p.name}</strong>
+                    <span>
+                      成功 {health?.ok ?? 0} · 失败 {health?.fail ?? 0}
+                      {lastErr
+                        ? ` · ${lastErr.slice(0, 48)}${lastErr.length > 48 ? "…" : ""}`
+                        : ""}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => onToggleProviderDisabled(p.id)}
+                  >
+                    {disabled ? "启用" : "禁用"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {onRefreshHealth ? (
+            <button type="button" className="ghost-btn" onClick={() => onRefreshHealth()}>
+              刷新统计
+            </button>
+          ) : null}
         </div>
 
         <div className="settings-block">
