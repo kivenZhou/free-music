@@ -2350,6 +2350,13 @@ button {
 
 .lyrics-head > .icon-btn {
   flex-shrink: 0;
+}
+
+.lyrics-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
   margin-left: auto;
 }
 

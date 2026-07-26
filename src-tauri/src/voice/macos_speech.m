@@ -101,7 +101,7 @@ static BOOL text_looks_like_wake(NSString *text) {
   // Keep in sync with frontend normalize / wake heuristics.
   NSArray<NSString *> *needles = @[
     @"小栈", @"小站", @"小战", @"小占", @"小赞", @"小张", @"小章", @"校长",
-    @"嚣张", @"小镇", @"小江", @"音栈", @"银站", @"xiaozhan"
+    @"嚣张", @"小镇", @"小江", @"音栈", @"银站", @"小展", @"小斩", @"xiaozhan"
   ];
   for (NSString *n in needles) {
     if ([s containsString:n]) return YES;
@@ -132,11 +132,11 @@ static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   float rms = (float)sqrt(sumSq / (double)n);
 
   // Absolute digital silence — skip (don't chase noise floor).
-  if (rms < 0.00025f) return;
+  if (rms < 0.00015f) return;
 
   // Fast attack / slow release so speech onset gets boosted quickly.
-  const float attack = 0.45f;
-  const float release = 0.04f;
+  const float attack = 0.55f;
+  const float release = 0.05f;
   if (rms > g_agc_rms) {
     g_agc_rms += (rms - g_agc_rms) * attack;
   } else {
@@ -144,14 +144,14 @@ static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   }
 
   float level = g_agc_rms;
-  if (level < 0.0008f) level = 0.0008f;
+  if (level < 0.0005f) level = 0.0005f;
 
-  // Hotter target for distant / quiet wake words.
-  const float target = 0.28f;
+  // Hotter target for quiet / near-laptop wake words.
+  const float target = 0.34f;
   float gain = target / level;
   if (gain < 1.0f) gain = 1.0f;
-  // ~26 dB ceiling for built-in mics a few meters away.
-  if (gain > 20.0f) gain = 20.0f;
+  // ~30 dB ceiling for built-in mics.
+  if (gain > 28.0f) gain = 28.0f;
 
   for (UInt32 ch = 0; ch < chCount; ch++) {
     float *samples = buffer.floatChannelData[ch];
@@ -178,17 +178,18 @@ static void start_recognition_session(void) {
     return;
   }
 
-  // Bias AGC toward boosting; quiet far-field speech adapts from here.
-  g_agc_rms = 0.004f;
+  // Bias AGC toward boosting; quiet speech adapts from here.
+  g_agc_rms = 0.0025f;
   g_request = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
   g_request.shouldReportPartialResults = YES;
   // Dictation is better than Confirmation for continuous wake-word listening.
   g_request.taskHint = SFSpeechRecognitionTaskHintDictation;
   g_request.contextualStrings = @[
-    @"小栈小栈", @"小栈", @"小站小站", @"小站", @"小张小张", @"校长校长",
+    @"小栈小栈", @"小栈", @"小站小站", @"小站", @"小张小张", @"小张",
+    @"校长校长", @"校长", @"嚣张", @"音栈", @"银站",
     @"继续", @"继续播放", @"暂停", @"下一首", @"上一首", @"换一首",
     @"帮我播放", @"我想听", @"播放", @"静音", @"大声点", @"小声点",
-    @"切歌", @"停止", @"来一首"
+    @"切歌", @"停止", @"来一首", @"在呢", @"在吗"
   ];
   if (@available(macOS 13.0, *)) {
     g_request.requiresOnDeviceRecognition = NO;
@@ -200,9 +201,9 @@ static void start_recognition_session(void) {
     return;
   }
 
-  // Larger tap buffers → stabler RMS for AGC on quiet far-field speech.
+  // Smaller tap → lower wake latency for short「小栈」bursts.
   [g_engine.inputNode installTapOnBus:0
-                           bufferSize:4096
+                           bufferSize:2048
                                format:format
                                 block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
                                   (void)when;

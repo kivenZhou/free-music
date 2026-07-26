@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Mic2, X } from "lucide-react";
+import { AppWindow, Mic2, X } from "lucide-react";
 import type { Track } from "../types";
 
 export interface LyricLine {
@@ -15,8 +15,10 @@ interface Props {
   lines: LyricLine[];
   loading: boolean;
   error: string | null;
+  desktopOpen?: boolean;
   onClose: () => void;
   onSeek: (sec: number) => void;
+  onPopOutDesktop?: () => void;
 }
 
 /** Parse LRC text into timed lines. */
@@ -60,7 +62,7 @@ export function mergeLyrics(
   });
 }
 
-function activeIndex(lines: LyricLine[], progress: number): number {
+export function activeLyricIndex(lines: LyricLine[], progress: number): number {
   if (lines.length === 0) return -1;
   let idx = 0;
   for (let i = 0; i < lines.length; i += 1) {
@@ -77,11 +79,16 @@ export function LyricsPanel({
   lines,
   loading,
   error,
+  desktopOpen = false,
   onClose,
   onSeek,
+  onPopOutDesktop,
 }: Props) {
   const listRef = useRef<HTMLDivElement | null>(null);
-  const active = useMemo(() => activeIndex(lines, progress), [lines, progress]);
+  const active = useMemo(
+    () => activeLyricIndex(lines, progress),
+    [lines, progress],
+  );
 
   useEffect(() => {
     if (!open || active < 0) return;
@@ -103,9 +110,27 @@ export function LyricsPanel({
           <span>歌词</span>
           {track ? <span className="lyrics-song">{track.title}</span> : null}
         </div>
-        <button type="button" className="icon-btn" onClick={onClose} title="关闭">
-          <X size={16} />
-        </button>
+        <div className="lyrics-head-actions">
+          {onPopOutDesktop ? (
+            <button
+              type="button"
+              className={`icon-btn ${desktopOpen ? "on" : ""}`}
+              onClick={onPopOutDesktop}
+              title={desktopOpen ? "桌面歌词已打开" : "弹出桌面歌词"}
+              disabled={
+                !track ||
+                loading ||
+                desktopOpen ||
+                (!!error && lines.length === 0)
+              }
+            >
+              <AppWindow size={16} />
+            </button>
+          ) : null}
+          <button type="button" className="icon-btn" onClick={onClose} title="关闭">
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="lyrics-body" ref={listRef}>

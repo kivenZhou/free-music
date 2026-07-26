@@ -35,306 +35,37 @@ import {
   writeVoiceEnabled,
   type VoiceUiStatus,
 } from "./voice";
+import {
+  QUEUE_STRONG_SCORE,
+  favKey,
+  findBestMatchingTrack,
+  findFavoriteTrack,
+  isSameSong,
+  uniqueTracks,
+} from "./trackMatch";
+import {
+  MINI_SIZE,
+  NORMAL_MIN,
+  PROVIDER_ORDER_KEY,
+  QUEUE_STORAGE_KEY,
+  clampSeekTime,
+  loadProviderOrder,
+  loadStoredQueue,
+  playbackDuration,
+  readStoredRepeat,
+  readStoredVolume,
+  shuffleTracks,
+  sortProvidersByOrder,
+} from "./playerUtils";
+import {
+  listenDesktopLyricsClosed,
+  listenDesktopLyricsDock,
+  listenDesktopLyricsReady,
+  openDesktopLyricsWindow,
+  syncDesktopLyricsState,
+} from "./desktopLyrics";
+
 import "./App.css";
-
-const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
-const PROVIDER_ORDER_KEY = "yinzhan-provider-order";
-const NORMAL_MIN = { width: 900, height: 600 };
-const MINI_SIZE = { width: 480, height: 96 };
-
-function favKey(t: Track) {
-  return `${t.provider}:${t.id}`;
-}
-
-/** Strip track-number prefixes / artist suffixes so cross-source dupes match. */
-function normalizeSongTitle(title: string): string {
-  let s = (title || "").toLowerCase().trim();
-  s = s.replace(/^(?:p\d+\s*)?\d{1,3}[\.．、．\s]+/i, "");
-  s = s.replace(/^[\[【\(（][^\]】\)）]{0,24}[\]】\)）]\s*/g, "");
-  s = s.replace(
-    /\s*[-—–_～~｜|／/]\s*[\u4e00-\u9fffA-Za-z0-9·\s]{1,20}$/u,
-    "",
-  );
-  s = s.replace(
-    /(?:官方(?:歌词)?版|直播版|现场版|完整版|高音质|无损|音频|伴奏|纯音乐|翻唱)$/g,
-    "",
-  );
-  s = s.replace(/[\s\-—–_～~｜|·.,，。!！?？、；;：:（）()【】\[\]"'“”‘’]/g, "");
-  return s;
-}
-
-function normalizeArtistName(artist: string): string {
-  return (artist || "")
-    .toLowerCase()
-    .replace(/合集|精选|音乐|无损|音频|合辑|playlist|collection/g, "")
-    .replace(/[\s\-—–_～~｜|·.,，。!！?？、；;：:（）()【】\[\]"'“”‘’]/g, "")
-    .trim();
-}
-
-function isSameSong(a: Track, b: Track): boolean {
-  if (favKey(a) === favKey(b)) return true;
-  const ta = normalizeSongTitle(a.title || "");
-  const tb = normalizeSongTitle(b.title || "");
-  if (ta.length < 2 || tb.length < 2) return false;
-
-  const titleHit =
-    ta === tb ||
-    (ta.length >= 4 && tb.length >= 4 && (ta.includes(tb) || tb.includes(ta)));
-  if (!titleHit) return false;
-
-  const aa = normalizeArtistName(a.artist || "");
-  const ab = normalizeArtistName(b.artist || "");
-  // B站合集等「歌手」常是 UP 主名，标题足够长时只靠标题判重
-  if (!aa || !ab) return true;
-  if (aa.includes(ab) || ab.includes(aa)) return true;
-  if (Math.min(ta.length, tb.length) >= 6) return true;
-  return false;
-}
-
-function uniqueTracks(list: Track[]): Track[] {
-  const out: Track[] = [];
-  for (const t of list) {
-    if (out.some((x) => isSameSong(x, t))) continue;
-    out.push(t);
-  }
-  return out;
-}
-
-/** Higher = closer title match. Exact favorites must beat “香草吧噗动态鼓谱”. */
-function lcsLen(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (!m || !n) return 0;
-  // Rolling DP to keep it light for short Chinese titles
-  let prev = new Array<number>(n + 1).fill(0);
-  let cur = new Array<number>(n + 1).fill(0);
-  for (let i = 1; i <= m; i += 1) {
-    for (let j = 1; j <= n; j += 1) {
-      cur[j] =
-        a[i - 1] === b[j - 1] ? (prev[j - 1] as number) + 1 : Math.max(prev[j] as number, cur[j - 1] as number);
-    }
-    [prev, cur] = [cur, prev];
-    cur.fill(0);
-  }
-  return prev[n] as number;
-}
-
-/** Soften common ASR confusions inside short titles. */
-function softenTitle(s: string): string {
-  return s
-    .replace(/[巴八扒]/g, "吧")
-    .replace(/[扑蒲埔]/g, "噗")
-    .replace(/[的得地]/g, "");
-}
-
-function parseArtistTitleQuery(query: string): { artist: string; title: string } {
-  const q = query.trim();
-  const m = q.match(/^(.+?)的(.+)$/);
-  if (m?.[1] && m?.[2] && m[1].length >= 2 && m[2].length >= 1) {
-    return { artist: m[1].trim(), title: m[2].trim() };
-  }
-  return { artist: "", title: q };
-}
-
-function scoreTrackMatch(track: Track, query: string): number {
-  const parsed = parseArtistTitleQuery(query);
-  const qTitle = softenTitle(normalizeSongTitle(parsed.title || query));
-  const qArtist = normalizeArtistName(parsed.artist || "");
-  const qFull = softenTitle(normalizeSongTitle(query));
-  const title = softenTitle(normalizeSongTitle(track.title || ""));
-  const artist = normalizeArtistName(track.artist || "");
-  if (!qTitle && !qFull) return 0;
-  if (!title && !artist) return 0;
-
-  let score = 0;
-  const candidates = [qTitle, qFull].filter((x, i, arr) => x && arr.indexOf(x) === i);
-
-  for (const q of candidates) {
-    if (title === q) {
-      score = Math.max(score, 100);
-      continue;
-    }
-    if (title.startsWith(q)) {
-      const extra = title.length - q.length;
-      score = Math.max(score, extra <= 2 ? 92 : Math.max(48, Math.round(88 * (q.length / title.length))));
-      continue;
-    }
-    if (q.startsWith(title) && title.length >= 2) {
-      const extra = q.length - title.length;
-      score = Math.max(score, extra <= 2 ? 88 : 52);
-      continue;
-    }
-    if (title.includes(q) && q.length >= 2) {
-      score = Math.max(score, Math.round(42 + 50 * (q.length / title.length)));
-      continue;
-    }
-    if (q.includes(title) && title.length >= 2) {
-      score = Math.max(score, Math.round(42 + 50 * (title.length / q.length)));
-      continue;
-    }
-    // Fuzzy: tolerate 1–2 ASR mistakes (香草八噗 ≈ 香草吧噗)
-    if (q.length >= 3 && title.length >= 3) {
-      const lcs = lcsLen(title, q);
-      const ratio = lcs / Math.max(q.length, title.length);
-      const cover = lcs / q.length;
-      if (cover >= 0.75 && ratio >= 0.6) {
-        score = Math.max(score, Math.round(55 + 40 * cover));
-      } else if (cover >= 0.6 && lcs >= 3) {
-        score = Math.max(score, Math.round(40 + 30 * cover));
-      }
-    }
-  }
-
-  if (qArtist && artist) {
-    if (artist === qArtist || artist.includes(qArtist) || qArtist.includes(artist)) {
-      score = Math.min(100, score + (score >= 40 ? 15 : 25));
-    }
-  } else if (!qArtist && artist && qFull.includes(artist) && title) {
-    // 「南拳妈妈香草吧噗」without 的
-    if (qFull.includes(title)) score = Math.max(score, 80);
-  }
-
-  return score;
-}
-
-function findBestMatchingTrack(
-  tracks: Track[],
-  query: string,
-  minScore = 1,
-): { track: Track; index: number; score: number } | null {
-  let best: Track | null = null;
-  let bestIndex = -1;
-  let bestScore = 0;
-  for (let i = 0; i < tracks.length; i += 1) {
-    const track = tracks[i];
-    if (!track || track.playability === "unavailable") continue;
-    const score = scoreTrackMatch(track, query);
-    if (score > bestScore) {
-      bestScore = score;
-      best = track;
-      bestIndex = i;
-    }
-  }
-  return best && bestIndex >= 0 && bestScore >= minScore
-    ? { track: best, index: bestIndex, score: bestScore }
-    : null;
-}
-
-function findFavoriteTrack(
-  favorites: FavoriteItem[],
-  query: string,
-): { track: Track; score: number } | null {
-  const hit = findBestMatchingTrack(
-    favorites.map((item) => item.track).filter(Boolean),
-    query,
-    55,
-  );
-  return hit ? { track: hit.track, score: hit.score } : null;
-}
-
-/** Queue jump only for near-exact title; favorites win over long-suffix hits. */
-const QUEUE_STRONG_SCORE = 92;
-
-function loadProviderOrder(): string[] {
-  try {
-    const raw = localStorage.getItem(PROVIDER_ORDER_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((id): id is string => typeof id === "string");
-  } catch {
-    return [];
-  }
-}
-
-function sortProvidersByOrder(
-  list: ProviderInfo[],
-  order: string[],
-): ProviderInfo[] {
-  if (order.length === 0) return list;
-  const rank = new Map(order.map((id, i) => [id, i]));
-  return [...list].sort((a, b) => {
-    const ai = rank.has(a.id) ? (rank.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
-    const bi = rank.has(b.id) ? (rank.get(b.id) as number) : Number.MAX_SAFE_INTEGER;
-    return ai - bi;
-  });
-}
-
-function loadStoredQueue(): { tracks: Track[]; index: number } | null {
-  try {
-    const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw) as { tracks?: Track[]; index?: number };
-    if (!Array.isArray(data.tracks) || data.tracks.length === 0) return null;
-    const index = Math.min(
-      Math.max(0, Number(data.index) || 0),
-      data.tracks.length - 1,
-    );
-    return { tracks: data.tracks, index };
-  } catch {
-    return null;
-  }
-}
-
-function readStoredVolume(): number {
-  const raw = localStorage.getItem("yinzhan-volume");
-  if (raw == null) return 0.85;
-  const n = Number(raw);
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.85;
-}
-
-function readStoredRepeat(): RepeatMode {
-  // v2: default list-loop (was "off", which auto-persisted on first launch).
-  const raw = localStorage.getItem("yinzhan-repeat-v2");
-  if (raw === "all" || raw === "one" || raw === "off") return raw;
-  return "all";
-}
-
-function shuffleTracks(list: Track[], preferIndex = 0): Track[] {
-  if (list.length <= 1) return [...list];
-  const preferred = list[preferIndex] ?? list[0];
-  const rest = list.filter((_, i) => i !== preferIndex);
-  for (let i = rest.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [rest[i], rest[j]] = [rest[j], rest[i]];
-  }
-  return [preferred, ...rest];
-}
-
-/** Prefer the media element's real duration; metadata can be wrong (esp. Bilibili). */
-function playbackDuration(
-  audio: HTMLAudioElement | null | undefined,
-  fallbackMs?: number | null,
-): number {
-  if (audio) {
-    const d = audio.duration;
-    if (Number.isFinite(d) && d > 0) return d;
-    if (audio.seekable.length > 0) {
-      const end = audio.seekable.end(audio.seekable.length - 1);
-      if (Number.isFinite(end) && end > 0) return end;
-    }
-  }
-  if (fallbackMs != null && Number.isFinite(fallbackMs) && fallbackMs > 0) {
-    return fallbackMs / 1000;
-  }
-  return 0;
-}
-
-function clampSeekTime(audio: HTMLAudioElement, sec: number): number {
-  const dur = playbackDuration(audio);
-  let target = Math.max(0, sec);
-  if (dur > 0) {
-    // Stay slightly before the end so we don't fire `ended` and auto-advance.
-    target = Math.min(target, Math.max(0, dur - 0.35));
-  }
-  if (audio.seekable.length > 0) {
-    const end = audio.seekable.end(audio.seekable.length - 1);
-    if (Number.isFinite(end) && end > 0) {
-      target = Math.min(target, Math.max(0, end - 0.35));
-    }
-  }
-  return target;
-}
 
 function App() {
   const storedQueue = useMemo(() => loadStoredQueue(), []);
@@ -391,6 +122,7 @@ function App() {
   }>({ mode: "none", offset: 0 });
   const [queueOpen, setQueueOpen] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [desktopLyricsOpen, setDesktopLyricsOpen] = useState(false);
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState<string | null>(null);
@@ -586,8 +318,15 @@ function App() {
     );
   }, [queue, queueIndex]);
 
+  const lyricsNeeded = lyricsOpen || desktopLyricsOpen;
+
   useEffect(() => {
-    if (!lyricsOpen || !current) {
+    if (!lyricsNeeded || !current) {
+      if (!lyricsNeeded) {
+        setLyricLines([]);
+        setLyricsError(null);
+        setLyricsLoading(false);
+      }
       return;
     }
     let cancelled = false;
@@ -612,7 +351,75 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [lyricsOpen, current]);
+  }, [lyricsNeeded, current]);
+
+  const pushDesktopLyricsState = useCallback(() => {
+    if (!desktopLyricsOpen) return;
+    void syncDesktopLyricsState({
+      title: current?.title ?? "",
+      artist: current?.artist ?? "",
+      lines: lyricLines,
+      progress,
+      loading: lyricsLoading,
+      error: lyricsError,
+      playing,
+    });
+  }, [
+    desktopLyricsOpen,
+    current,
+    lyricLines,
+    progress,
+    lyricsLoading,
+    lyricsError,
+    playing,
+  ]);
+
+  useEffect(() => {
+    pushDesktopLyricsState();
+  }, [pushDesktopLyricsState]);
+
+  useEffect(() => {
+    let unReady: (() => void) | undefined;
+    let unClosed: (() => void) | undefined;
+    let unDock: (() => void) | undefined;
+    void listenDesktopLyricsReady(() => {
+      pushDesktopLyricsState();
+    }).then((fn) => {
+      unReady = fn;
+    });
+    void listenDesktopLyricsClosed(() => {
+      setDesktopLyricsOpen(false);
+    }).then((fn) => {
+      unClosed = fn;
+    });
+    void listenDesktopLyricsDock(() => {
+      setDesktopLyricsOpen(false);
+      setQueueOpen(false);
+      setLyricsOpen(true);
+    }).then((fn) => {
+      unDock = fn;
+    });
+    return () => {
+      unReady?.();
+      unClosed?.();
+      unDock?.();
+    };
+  }, [pushDesktopLyricsState]);
+
+  /** Pop out: close in-app panel, show floating lyrics. */
+  const popOutDesktopLyrics = useCallback(async () => {
+    if (desktopLyricsOpen) return;
+    setLyricsOpen(false);
+    setQueueOpen(false);
+    try {
+      await openDesktopLyricsWindow();
+      setDesktopLyricsOpen(true);
+    } catch (e) {
+      console.warn("open desktop lyrics failed", e);
+      setDesktopLyricsOpen(false);
+      setLyricsOpen(true);
+    }
+  }, [desktopLyricsOpen]);
 
   const applyVolume = useCallback((vol: number, isMuted: boolean) => {
     const audio = audioRef.current;
@@ -2045,8 +1852,10 @@ function App() {
         lines={lyricLines}
         loading={lyricsLoading}
         error={lyricsError}
+        desktopOpen={desktopLyricsOpen}
         onClose={() => setLyricsOpen(false)}
         onSeek={seekToSeconds}
+        onPopOutDesktop={() => void popOutDesktopLyrics()}
       />
 
       <PlayerBar

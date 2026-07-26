@@ -20,8 +20,26 @@ export function chartCacheKey(provider: string, chartId: string) {
   return `${provider}::${chartId}`;
 }
 
+/** Drop tracks that don't belong to this provider (guards cross-source cache pollution). */
+export function tracksForProvider(provider: string, tracks: Track[]): Track[] {
+  return tracks.filter((t) => t.provider === provider);
+}
+
 export function getChartPage(provider: string, chartId: string): ChartPageCache | null {
-  return pageCache.get(chartCacheKey(provider, chartId)) ?? null;
+  const cached = pageCache.get(chartCacheKey(provider, chartId));
+  if (!cached) return null;
+  const tracks = tracksForProvider(provider, cached.tracks);
+  if (tracks.length === 0) {
+    // Polluted / empty entry — force a refetch next time.
+    pageCache.delete(chartCacheKey(provider, chartId));
+    return null;
+  }
+  if (tracks.length !== cached.tracks.length) {
+    const cleaned = { ...cached, tracks, updatedAt: Date.now() };
+    pageCache.set(chartCacheKey(provider, chartId), cleaned);
+    return cleaned;
+  }
+  return cached;
 }
 
 export function setChartPage(
@@ -31,10 +49,14 @@ export function setChartPage(
   hasMore: boolean,
   scrollTop?: number,
 ) {
+  const owned = tracksForProvider(provider, tracks);
+  // Never persist another provider's songs under this key.
+  if (owned.length === 0 && tracks.length > 0) return;
+
   const key = chartCacheKey(provider, chartId);
   const prev = pageCache.get(key);
   pageCache.set(key, {
-    tracks,
+    tracks: owned,
     hasMore,
     scrollTop: scrollTop ?? prev?.scrollTop ?? 0,
     updatedAt: Date.now(),

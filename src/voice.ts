@@ -130,15 +130,18 @@ interface SpeechRecognitionEventLike {
 }
 
 /** Homophones / near-misses ASR often returns for 栈 (esp. far-field). */
-const ZHAN_VARIANTS = "栈站战占赞暂绽湛蘸张章胀账杖";
+const ZHAN_VARIANTS = "栈站战占赞暂绽湛蘸张章胀账杖展斩盏";
 
 function normalize(text: string): string {
   let s = text
     .toLowerCase()
-    .replace(/[\s,，。.!！?？、；;：:\-—_'"`~]/g, "");
+    .replace(/[\s,，。.!！?？、；;：:\-—_'"\`~··]/g, "");
   // Whole-phrase ASR mangling common at a distance
   s = s.replace(/xiao\s*zhan/gi, "小栈");
-  s = s.replace(/校长|嚣张|小镇|小江|小姜|小疆|音栈|银栈|银站|阴站|心战/g, "小栈");
+  s = s.replace(
+    /校长|嚣张|小镇|小江|小姜|小疆|音栈|银栈|银站|阴站|心战|小展|小斩|小盏|消站|笑站|想站/g,
+    "小栈",
+  );
   // Map 小X → 小栈 for common variants
   const re = new RegExp(`小[${ZHAN_VARIANTS}]`, "g");
   s = s.replace(re, "小栈");
@@ -149,7 +152,11 @@ function normalize(text: string): string {
 
 function wakeFillerOnly(rest: string): boolean {
   if (!rest) return true;
-  return /^(?:呀|啊|呢|嗯|哦|哎|欸|诶|呀啊|啊啊|嗯嗯|请|你|我说|那个)$/.test(rest);
+  // Tolerate short trailing ASR junk after the wake word.
+  if (rest.length <= 4) return true;
+  return /^(?:呀|啊|呢|嗯|哦|哎|欸|诶|呀啊|啊啊|嗯嗯|请|你|我说|那个|在吗|在不在|你好|嗨|喂)$/.test(
+    rest,
+  );
 }
 
 function hasWakeWord(norm: string): boolean {
@@ -158,8 +165,12 @@ function hasWakeWord(norm: string): boolean {
   if (parts.length >= 3) return true;
   if (/小栈{2,}/.test(norm)) return true;
   if (/小栈栈|栈小栈|小小栈|栈栈/.test(norm)) return true;
-  // Far-field: a single clear「小栈」with nothing else is enough to wake
+  // Single「小栈」is enough — even with short trailing noise.
   if (countWakeTokens(norm) >= 1 && wakeFillerOnly(stripWakeWord(norm))) {
+    return true;
+  }
+  // Short utterance containing 小栈 anywhere (near-mic ASR often wraps fillers).
+  if (countWakeTokens(norm) >= 1 && norm.length <= 12) {
     return true;
   }
   return false;
@@ -1047,8 +1058,8 @@ export class VoiceAssistant {
       this.handlers.onMusicDuck?.(1);
       return;
     }
-    // Mild duck only — heavy duck made music feel broken vs loud TTS.
-    this.handlers.onMusicDuck?.(active ? 0.55 : 1);
+    // Stronger duck while waiting for wake — laptop mics easily hear the speakers.
+    this.handlers.onMusicDuck?.(active ? 0.28 : 1);
   }
 
   private scheduleCommandWindow(ms: number) {
@@ -1069,13 +1080,12 @@ export class VoiceAssistant {
 
   private triggerWake(detail = VOICE_WAKE_REPLY) {
     const now = Date.now();
-    if (now - this.lastWakeAt < 1200) return;
+    if (now - this.lastWakeAt < 800) return;
     this.lastWakeAt = now;
     this.wakeHits = 0;
     this.beginMusicHold();
-    // Brief ignore for TTS echo; speakReply tightens this when playback ends.
-    // (Was 5s to cover Edge TTS latency — short acks now use system voice.)
-    this.ignoreUntil = now + 2500;
+    // Short ignore for TTS echo; speakReply resets this when done.
+    this.ignoreUntil = now + 1800;
     this.awakeUntil = now + 12000;
     this.handlers.onStatus?.("speaking", detail);
     void this.speakReply(VOICE_WAKE_REPLY);
@@ -1353,28 +1363,32 @@ export class VoiceAssistant {
 
     if (!awake) {
       const wokeOnly = parseVoiceText(trimmed, false);
-      if (wokeOnly?.kind === "wake") {
+      const tokens = countWakeTokens(norm);
+      const rest = stripWakeWord(norm);
+      const pureWake =
+        wokeOnly?.kind === "wake" ||
+        (tokens >= 1 && (wakeFillerOnly(rest) || norm.length <= 12));
+
+      // Pure wake (incl. short partial ASR) — fire immediately.
+      if (pureWake && (!wokeOnly || wokeOnly.kind === "wake")) {
         this.clearEndpointTimer();
         this.utteranceBuf = "";
         this.triggerWake();
         return;
       }
-      if (!wokeOnly) {
+
+      if (!wokeOnly && tokens > 0) {
         if (now > this.wakeHitResetAt) this.wakeHits = 0;
-        const tokens = countWakeTokens(norm);
-        if (tokens > 0) {
-          this.wakeHits += tokens;
-          this.wakeHitResetAt = now + 4000;
-          const rest = stripWakeWord(norm);
-          // One solid wake token (or accumulated 小栈) with no command body → wake.
-          if (wakeFillerOnly(rest) && (tokens >= 1 || this.wakeHits >= 1)) {
-            this.clearEndpointTimer();
-            this.utteranceBuf = "";
-            this.triggerWake();
-            return;
-          }
+        this.wakeHits += tokens;
+        this.wakeHitResetAt = now + 5000;
+        if (this.wakeHits >= 1 && (wakeFillerOnly(rest) || norm.length <= 12)) {
+          this.clearEndpointTimer();
+          this.utteranceBuf = "";
+          this.triggerWake();
+          return;
         }
       }
+
       // 「小栈小栈播放xxx」— wait until speech ends so we don't cut off the song name.
       if (
         wokeOnly &&
