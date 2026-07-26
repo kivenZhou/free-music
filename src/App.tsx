@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, providerLabel } from "./api";
+import {
+  formatHotkeyAccel,
+  readHotkeyMap,
+  readHotkeysEnabled,
+  registerHotkeys,
+  unregisterAllHotkeys,
+  writeHotkeyMap,
+  writeHotkeysEnabled,
+  type HotkeyAction,
+} from "./hotkeys";
 import { BrandMark } from "./components/BrandMark";
 import { ChartsView } from "./components/ChartsView";
 import { FavoritesView } from "./components/FavoritesView";
@@ -359,6 +370,9 @@ function App() {
   const [volume, setVolume] = useState(readStoredVolume);
   const [muted, setMuted] = useState(() => localStorage.getItem("yinzhan-muted") === "1");
   const [voiceEnabled, setVoiceEnabled] = useState(readVoiceEnabled);
+  const [hotkeysEnabled, setHotkeysEnabled] = useState(readHotkeysEnabled);
+  const [hotkeyMap, setHotkeyMap] = useState(readHotkeyMap);
+  const [hotkeyWarning, setHotkeyWarning] = useState<string | undefined>();
   const [voiceUi, setVoiceUi] = useState<{
     status: VoiceUiStatus;
     detail: string;
@@ -922,6 +936,7 @@ function App() {
     queueIndexRef.current = 0;
   }, []);
 
+  /** UI / media-key prev: restart current if already past ~3s (common player UX). */
   const playPrev = useCallback(() => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) {
@@ -929,6 +944,11 @@ function App() {
       setProgress(0);
       return;
     }
+    advance(-1);
+  }, [advance]);
+
+  /** Voice「上一首」: always go to the previous track. */
+  const playPrevTrack = useCallback(() => {
     advance(-1);
   }, [advance]);
 
@@ -1067,6 +1087,16 @@ function App() {
   const onVoiceEnabled = useCallback((on: boolean) => {
     setVoiceEnabled(on);
     writeVoiceEnabled(on);
+  }, []);
+
+  const onHotkeysEnabled = useCallback((on: boolean) => {
+    setHotkeysEnabled(on);
+    writeHotkeysEnabled(on);
+  }, []);
+
+  const onHotkeyMapChange = useCallback((map: Record<HotkeyAction, string>) => {
+    setHotkeyMap(map);
+    writeHotkeyMap(map);
   }, []);
 
   useEffect(() => {
@@ -1432,7 +1462,7 @@ function App() {
   useEffect(() => {
     voiceRef.current?.updateHandlers({
       onNext: () => playNext(),
-      onPrev: () => playPrev(),
+      onPrev: () => playPrevTrack(),
       onPlay: () => {
         const audio = audioRef.current;
         if (!audio) return;
@@ -1519,7 +1549,7 @@ function App() {
     });
   }, [
     playNext,
-    playPrev,
+    playPrevTrack,
     togglePlay,
     toggleMute,
     onVoiceMusicHold,
@@ -1597,6 +1627,74 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay, playPrev, playNext, seekToSeconds, toggleMute]);
+
+  const shellActionRef = useRef({
+    toggle: () => undefined as void,
+    next: () => undefined as void,
+    prev: () => undefined as void,
+    favorite: () => undefined as void,
+  });
+  shellActionRef.current = {
+    toggle: () => togglePlay(),
+    next: () => playNext(),
+    prev: () => playPrevTrack(),
+    favorite: () => {
+      const track = current;
+      if (track) void toggleFavorite(track);
+    },
+  };
+
+  // Tray menu → frontend player actions
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<string>("tray-action", (event) => {
+      const action = event.payload;
+      if (action === "toggle") shellActionRef.current.toggle();
+      else if (action === "next") shellActionRef.current.next();
+      else if (action === "prev") shellActionRef.current.prev();
+      else if (action === "favorite") shellActionRef.current.favorite();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Global hotkeys (work while window is in background)
+  useEffect(() => {
+    let cancelled = false;
+    if (!hotkeysEnabled) {
+      void unregisterAllHotkeys(hotkeyMap);
+      setHotkeyWarning(undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void registerHotkeys(hotkeyMap, {
+      onToggle: () => shellActionRef.current.toggle(),
+      onNext: () => shellActionRef.current.next(),
+      onPrev: () => shellActionRef.current.prev(),
+      onFavorite: () => shellActionRef.current.favorite(),
+    }).then((failed) => {
+      if (cancelled) return;
+      if (failed.length > 0) {
+        setHotkeyWarning(
+          `部分快捷键注册失败（可能被其他应用占用）：${failed
+            .map(formatHotkeyAccel)
+            .join("、")}`,
+        );
+      } else {
+        setHotkeyWarning(undefined);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      void unregisterAllHotkeys(hotkeyMap);
+    };
+  }, [hotkeysEnabled, hotkeyMap]);
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
@@ -1889,6 +1987,11 @@ function App() {
                         : "准备中…")
                 : undefined
             }
+            hotkeysEnabled={hotkeysEnabled}
+            onHotkeysEnabled={onHotkeysEnabled}
+            hotkeyMap={hotkeyMap}
+            onHotkeyMap={onHotkeyMapChange}
+            hotkeyWarning={hotkeyWarning}
             active={nav === "settings"}
             onUpdateAvailable={(u) => {
               if (u) setPendingUpdate(u);

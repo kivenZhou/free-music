@@ -385,8 +385,9 @@ int voice_macos_speak(const char *text_utf8) {
     utt.pitchMultiplier = 1.0f;
     // Below full blast so replies don't dwarf ducked music.
     utt.volume = 0.72f;
-    utt.preUtteranceDelay = 0.08;
-    utt.postUtteranceDelay = 0.12;
+    // Keep delays tiny so wake ack「在呢」starts immediately after recognition.
+    utt.preUtteranceDelay = 0.02;
+    utt.postUtteranceDelay = 0.06;
     [g_synth speakUtterance:utt];
   });
 

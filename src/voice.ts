@@ -1073,8 +1073,9 @@ export class VoiceAssistant {
     this.lastWakeAt = now;
     this.wakeHits = 0;
     this.beginMusicHold();
-    // Ignore ASR while TTS plays (native also pauses mic).
-    this.ignoreUntil = now + 5000;
+    // Brief ignore for TTS echo; speakReply tightens this when playback ends.
+    // (Was 5s to cover Edge TTS latency — short acks now use system voice.)
+    this.ignoreUntil = now + 2500;
     this.awakeUntil = now + 12000;
     this.handlers.onStatus?.("speaking", detail);
     void this.speakReply(VOICE_WAKE_REPLY);
@@ -1125,8 +1126,6 @@ export class VoiceAssistant {
       return;
     }
 
-    await this.speakAck(`收到，${actionLabel(action)}`);
-
     if (action === "pause" || action === "mute") {
       this.suppressResume = true;
     }
@@ -1134,6 +1133,17 @@ export class VoiceAssistant {
       this.suppressResume = true;
     }
 
+    // Skip tracks before TTS so「上一首 / 下一首」isn't delayed by speech.
+    if (action === "next" || action === "prev") {
+      applyAction(action, this.handlers);
+      // New track may have started playing; pause again so the ack is clear.
+      this.handlers.onPause();
+      await this.speakAck(`收到，${actionLabel(action)}`);
+      this.finishSession(`已执行：${actionLabel(action)}`, true);
+      return;
+    }
+
+    await this.speakAck(`收到，${actionLabel(action)}`);
     applyAction(action, this.handlers);
     const resume =
       action !== "pause" && action !== "mute" && action !== "play_favorites";
