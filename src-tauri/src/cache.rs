@@ -70,6 +70,10 @@ pub fn clear_all(cache_dir: &Path) -> Result<CacheStats, String> {
         fs::remove_dir_all(&root).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    // Recreate per-provider folders so the next download doesn't fail on missing path.
+    for sub in ["bilibili", "netease", "qq", "kugou", "kuwo", "audius"] {
+        let _ = fs::create_dir_all(root.join(sub));
+    }
     Ok(stats(cache_dir))
 }
 

@@ -8,17 +8,22 @@ use std::path::PathBuf;
 const UA: &str = "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36";
 
 const CHARTS: &[(&str, &str, &str, &str)] = &[
-    ("流行", "热歌精选", "cn", "酷狗免费可播热门"),
-    ("新歌", "新歌精选", "cn", "酷狗免费可播新歌"),
+    ("华语流行", "热歌精选", "cn", "酷狗搜索精选（部分需转酷我播放）"),
+    ("华语新歌", "新歌精选", "cn", "酷狗免费向新歌"),
     ("粤语经典", "粤语金曲", "hk", "粤语免费精选"),
     ("粤语歌", "粤语流行", "hk", "粤语流行向"),
     ("80年代经典", "80年代", "cn", "八十年代怀旧"),
     ("90年代经典", "90年代", "cn", "九十年代怀旧"),
     ("怀旧金曲", "怀旧金曲", "cn", "经典怀旧精选"),
-    ("韩语", "韩国流行", "kr", "韩流免费精选"),
-    ("日语", "日本流行", "jp", "日流免费精选"),
-    ("抖音", "抖音热歌", "cn", "抖音向免费精选"),
+    ("韩语流行", "韩国流行", "kr", "韩流免费精选"),
+    ("日语流行", "日本流行", "jp", "日流免费精选"),
+    ("轻音乐", "轻音乐", "cn", "轻音乐 / 纯音乐"),
 ];
+
+fn is_junk_title(title: &str) -> bool {
+    const NEEDLES: &[&str] = &["伴奏", "片段", "试听", "铃声", "消音", "DJ版", "抖音热搜"];
+    NEEDLES.iter().any(|n| title.contains(n))
+}
 
 fn prefer_http(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("https://") {
@@ -61,6 +66,9 @@ impl KugouProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("未知歌曲")
             .to_string();
+        if is_junk_title(&title) {
+            return None;
+        }
         let artist = item
             .get("singername")
             .or_else(|| item.get("singerName"))
@@ -374,9 +382,10 @@ impl MusicProvider for KugouProvider {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Track>, ProviderError> {
-        let page_size = limit.max(1);
-        let page = (offset / page_size) + 1;
-        let skip = (offset % page_size) as usize;
+        // Oversample — junk-title filter and sparse free rows shrink each page.
+        let page_size = (limit.saturating_mul(2)).clamp(limit, 40);
+        let page = (offset / limit.max(1)) + 1;
+        let skip = (offset % limit.max(1)) as usize;
         let candidates = self.search_raw(chart_id, page_size, page).await?;
         Ok(candidates
             .into_iter()

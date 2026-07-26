@@ -25,6 +25,11 @@ const CHARTS: &[(&str, &str, &str, &str)] = &[
     ("怀旧金曲", "怀旧金曲", "cn", "经典怀旧精选"),
 ];
 
+fn is_junk_keyword_title(title: &str) -> bool {
+    const NEEDLES: &[&str] = &["伴奏", "片段", "试听", "铃声", "DJ版", "抖音热搜"];
+    NEEDLES.iter().any(|n| title.contains(n))
+}
+
 /// Quality ladder for anonymous play. Prefer widely free formats first.
 const QUALITIES: &[(&str, &str)] = &[
     ("M500", "mp3"), // 128kbps — most free tracks
@@ -217,12 +222,12 @@ impl QqProvider {
         Ok(list.iter().filter_map(Self::map_song).collect())
     }
 
-    async fn toplist_raw(
+    async fn toplist_rows(
         &self,
         topid: &str,
         begin: u32,
         num: u32,
-    ) -> Result<Vec<Track>, ProviderError> {
+    ) -> Result<Vec<Value>, ProviderError> {
         let url = format!(
             "https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?tpl=3&page=detail&topid={topid}&type=top&song_begin={begin}&song_num={}&format=json",
             num.clamp(1, 100)
@@ -232,15 +237,11 @@ impl QqProvider {
             .json()
             .await
             .map_err(|e| ProviderError::Parse(format!("qq toplist json: {e}")))?;
-        let list = json
+        Ok(json
             .get("songlist")
             .and_then(|v| v.as_array())
             .cloned()
-            .unwrap_or_default();
-        Ok(list
-            .iter()
-            .filter_map(|row| row.get("data").and_then(Self::map_song))
-            .collect())
+            .unwrap_or_default())
     }
 
     async fn request_vkey(
@@ -446,13 +447,35 @@ impl MusicProvider for QqProvider {
         offset: u32,
     ) -> Result<Vec<Track>, ProviderError> {
         let mut tracks = if chart_id.chars().all(|c| c.is_ascii_digit()) {
-            // Pull a wider window — free rows are sparse on some charts (e.g. 热歌榜).
-            let want = ((limit + offset) * 4).max(40).min(100);
-            self.toplist_raw(chart_id, 0, want)
-                .await?
-                .into_iter()
-                .skip(offset as usize)
-                .collect::<Vec<Track>>()
+            // Free rows are sparse on VIP-heavy boards — walk song_begin until we
+            // have enough free tracks (or hit the board end / safety cap).
+            let need = (offset + limit) as usize;
+            let mut free = Vec::new();
+            let mut begin = 0u32;
+            let mut vip_streak = 0u32;
+            while free.len() < need && begin < 500 {
+                let rows = self.toplist_rows(chart_id, begin, 50).await?;
+                if rows.is_empty() {
+                    break;
+                }
+                let raw_n = rows.len() as u32;
+                let before = free.len();
+                for row in &rows {
+                    if let Some(t) = row.get("data").and_then(Self::map_song) {
+                        free.push(t);
+                    }
+                }
+                if free.len() == before {
+                    vip_streak += 1;
+                    if vip_streak >= 4 {
+                        break;
+                    }
+                } else {
+                    vip_streak = 0;
+                }
+                begin += raw_n;
+            }
+            free.into_iter().skip(offset as usize).collect::<Vec<_>>()
         } else {
             let page_size = limit.max(1);
             let page = (offset / page_size) + 1;
@@ -460,6 +483,7 @@ impl MusicProvider for QqProvider {
             self.search_raw(chart_id, page, (page_size * 3).min(40))
                 .await?
                 .into_iter()
+                .filter(|t| !is_junk_keyword_title(&t.title))
                 .skip(skip)
                 .collect::<Vec<Track>>()
         };

@@ -11,10 +11,11 @@ import {
   getChartPage,
   getProviderCharts,
   setChartPage,
-  setChartScroll,
   setProviderActive,
   setProviderCharts,
   tracksForProvider,
+  rememberScroll,
+  resolveScroll,
 } from "../chartCache";
 import type { Chart, Track } from "../types";
 import { SongList } from "./SongList";
@@ -37,9 +38,12 @@ const PAGE_SIZE = 20;
 
 const REGION_LABEL: Record<string, string> = {
   cn: "国内",
+  hk: "港台",
   kr: "韩国",
   jp: "日本",
   us: "欧美",
+  global: "全球",
+  bilibili: "B站",
 };
 
 function regionBadge(region: string): string | null {
@@ -88,6 +92,8 @@ export function ChartsView({
   const debounceRef = useRef<number | null>(null);
   /** Provider id that currently owns the visible tracks (guards stale apply). */
   const tracksOwnerRef = useRef<string | null>(null);
+  /** Latest scrollTop for the visible list — don't rely on DOM during provider teardown. */
+  const scrollTopRef = useRef(0);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -122,19 +128,8 @@ export function ChartsView({
     return true;
   }, []);
 
-  const persistCurrent = useCallback(() => {
-    const id = providerIdRef.current;
-    const chartId = activeRef.current;
-    if (chartsRef.current.length > 0) {
-      setProviderCharts(id, chartsRef.current, chartId);
-    }
-    if (!chartId) return;
-    // Only persist when the visible list still belongs to this provider.
-    if (tracksOwnerRef.current !== id) return;
-    const owned = tracksForProvider(id, tracksRef.current);
-    if (owned.length === 0) return;
-    setChartPage(id, chartId, owned, hasMoreRef.current, readScrollTop());
-  }, [readScrollTop]);
+  /** Persist one provider's current list into the session cache. */
+  // (snapshot happens in useLayoutEffect on provider change — see below)
 
   const applyPage = useCallback(
     (
@@ -143,21 +138,33 @@ export function ChartsView({
       list: Track[],
       more: boolean,
       scrollTop?: number,
-      opts?: { updateUi?: boolean },
+      opts?: { updateUi?: boolean; forceUi?: boolean },
     ) => {
       const owned = tracksForProvider(provider, list);
-      setChartPage(provider, chartId, owned, more, scrollTop);
+      // Prefer explicit scroll, then this provider's remembered position (0 is valid).
+      const top =
+        scrollTop != null ? scrollTop : resolveScroll(provider, chartId);
+      // Only overwrite cache with real data — an empty fetch must not wipe a good page.
+      if (owned.length > 0) {
+        setChartPage(provider, chartId, owned, more, top);
+        rememberScroll(provider, chartId, top);
+      }
       setProviderActive(provider, chartId);
 
       const updateUi = opts?.updateUi !== false;
-      if (!updateUi || !isLive(provider, chartId)) return;
+      if (!updateUi) return;
+      // forceUi: bootstrap restore runs before activeRef catches up via useEffect.
+      if (!opts?.forceUi && !isLive(provider, chartId)) return;
 
       tracksOwnerRef.current = provider;
+      activeRef.current = chartId;
+      providerIdRef.current = provider;
       setTracks([...owned]);
-      setHasMore(more);
-      if (scrollTop != null) {
-        pendingScrollRef.current = scrollTop;
-      }
+      setHasMore(owned.length > 0 && more);
+      scrollTopRef.current = top;
+      // Always schedule restore — including 0, so we don't keep the previous
+      // provider's scrollTop on the shared panel-body.
+      pendingScrollRef.current = top;
     },
     [isLive],
   );
@@ -167,14 +174,17 @@ export function ChartsView({
       if (!opts?.force) {
         const cached = getChartPage(provider, chartId);
         if (cached && cached.tracks.length > 0) {
-          if (!isLive(provider)) return;
+          if (providerIdRef.current !== provider) return;
+          activeRef.current = chartId;
           setActive(chartId);
+          const top = resolveScroll(provider, chartId, cached.scrollTop);
           applyPage(
             provider,
             chartId,
             cached.tracks,
             cached.hasMore,
-            cached.scrollTop,
+            top,
+            { forceUi: true },
           );
           setLoading(false);
           setLoadingMore(false);
@@ -193,13 +203,21 @@ export function ChartsView({
       }
       try {
         const res = await api.chartTracks(chartId, PAGE_SIZE, provider, 0);
-        const more = res.length >= PAGE_SIZE;
+        const owned = tracksForProvider(provider, res);
+        const more = owned.length >= PAGE_SIZE;
         // Always cache this provider/chart result; only update UI if still current.
         // (Prevents losing a good response when the user briefly switched away.)
-        applyPage(provider, chartId, res, more, 0, {
+        applyPage(provider, chartId, owned, more, 0, {
           updateUi:
             inflightKey.current === key && isLive(provider, chartId),
         });
+        if (
+          inflightKey.current === key &&
+          isLive(provider, chartId) &&
+          owned.length === 0
+        ) {
+          setError("暂时没有拿到歌曲，请稍后再点「重新加载」");
+        }
       } catch (e) {
         if (inflightKey.current === key && isLive(provider, chartId)) {
           setError(String(e).replace(/^Error:\s*/, ""));
@@ -276,13 +294,43 @@ export function ChartsView({
     isLive,
   ]);
 
-  // Persist snapshot (tracks + scroll) before leaving a provider.
+  // Snapshot scroll + list BEFORE paint effects clear content.
+  // Important: this must be useLayoutEffect — useEffect runs after a paint where
+  // playableTracks was already filtered empty for the new provider (scroll → 0).
+  const prevProviderRef = useRef(providerId);
+  useLayoutEffect(() => {
+    const prev = prevProviderRef.current;
+    if (prev === providerId) return;
+
+    const chartId = activeRef.current;
+    const top = scrollRef.current?.scrollTop ?? scrollTopRef.current;
+    if (
+      chartId &&
+      tracksOwnerRef.current === prev &&
+      tracksRef.current.length > 0
+    ) {
+      scrollTopRef.current = top;
+      rememberScroll(prev, chartId, top);
+      if (chartsRef.current.length > 0) {
+        setProviderCharts(prev, chartsRef.current, chartId);
+      }
+      setChartPage(
+        prev,
+        chartId,
+        tracksForProvider(prev, tracksRef.current),
+        hasMoreRef.current,
+        top,
+      );
+    }
+    prevProviderRef.current = providerId;
+  }, [providerId]);
+
+  // Cancel in-flight debounce when leaving a provider.
   useEffect(() => {
     return () => {
       clearDebounce();
-      persistCurrent();
     };
-  }, [providerId, persistCurrent, clearDebounce]);
+  }, [providerId, clearDebounce]);
 
   // Keep scrollTop fresh while the user scrolls the list body.
   useEffect(() => {
@@ -291,40 +339,64 @@ export function ChartsView({
 
     const onScroll = () => {
       const chartId = activeRef.current;
-      const provider = providerIdRef.current;
+      const provider = tracksOwnerRef.current ?? providerIdRef.current;
       if (!chartId || tracksOwnerRef.current !== provider) return;
-      setChartScroll(provider, chartId, scroller.scrollTop);
+      const top = scroller.scrollTop;
+      scrollTopRef.current = top;
+      rememberScroll(provider, chartId, top);
     };
 
     scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       scroller.removeEventListener("scroll", onScroll);
       const chartId = activeRef.current;
-      const provider = providerIdRef.current;
-      if (
-        chartId &&
-        tracksOwnerRef.current === provider &&
-        tracksRef.current.length > 0
-      ) {
-        setChartScroll(provider, chartId, scroller.scrollTop);
+      const provider = tracksOwnerRef.current;
+      if (chartId && provider && tracksRef.current.length > 0) {
+        const top = scroller.scrollTop;
+        scrollTopRef.current = top;
+        rememberScroll(provider, chartId, top);
       }
     };
   }, [providerId, active]);
 
-  // Restore scroll after tracks paint.
+  // Restore scroll after tracks paint. Must apply 0 too — shared scroller would
+  // otherwise keep the previous provider's offset.
   useLayoutEffect(() => {
-    if (pendingScrollRef.current == null) return;
     const top = pendingScrollRef.current;
-    pendingScrollRef.current = null;
+    if (top == null) return;
     const scroller = scrollRef.current;
     if (!scroller) return;
-    scroller.scrollTop = top;
-    window.requestAnimationFrame(() => {
-      scroller.scrollTop = top;
-    });
-  }, [tracks, providerId, active]);
 
-  // Provider bootstrap — restore session cache when possible.
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled) return;
+      scroller.scrollTop = top;
+      scrollTopRef.current = top;
+    };
+    apply();
+    const raf1 = window.requestAnimationFrame(() => {
+      apply();
+      window.requestAnimationFrame(apply);
+    });
+    const timer = window.setTimeout(() => {
+      apply();
+      if (Math.abs(scroller.scrollTop - top) < 2) {
+        pendingScrollRef.current = null;
+      }
+    }, 100);
+    const timer2 = window.setTimeout(() => {
+      apply();
+      pendingScrollRef.current = null;
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf1);
+      window.clearTimeout(timer);
+      window.clearTimeout(timer2);
+    };
+  }, [tracks, providerId, active]);
+  // Provider bootstrap — restore session cache when possible (no network).
   useEffect(() => {
     const epoch = ++providerEpoch.current;
     const forProvider = providerId;
@@ -332,6 +404,9 @@ export function ChartsView({
     inflightKey.current = null;
     setError(null);
     setLoadingMore(false);
+
+    // Keep refs in sync immediately — downstream isLive/applyPage depend on them.
+    providerIdRef.current = forProvider;
 
     const cachedProvider = getProviderCharts(forProvider);
     if (cachedProvider && cachedProvider.charts.length > 0) {
@@ -342,7 +417,9 @@ export function ChartsView({
           : (cachedProvider.charts[0]?.id ?? null);
 
       setCharts(cachedProvider.charts);
+      chartsRef.current = cachedProvider.charts;
       setActive(firstId);
+      activeRef.current = firstId;
 
       if (!firstId) {
         tracksOwnerRef.current = forProvider;
@@ -355,17 +432,20 @@ export function ChartsView({
 
       const cachedPage = getChartPage(forProvider, firstId);
       if (cachedPage && cachedPage.tracks.length > 0) {
+        const top = resolveScroll(forProvider, firstId, cachedPage.scrollTop);
         applyPage(
           forProvider,
           firstId,
           cachedPage.tracks,
           cachedPage.hasMore,
-          cachedPage.scrollTop,
+          top,
+          { forceUi: true },
         );
         setLoading(false);
         return;
       }
 
+      // Charts meta cached but page missing — fetch once.
       tracksOwnerRef.current = forProvider;
       setTracks([]);
       setHasMore(false);
@@ -378,6 +458,7 @@ export function ChartsView({
     tracksOwnerRef.current = forProvider;
     setCharts([]);
     setActive(null);
+    activeRef.current = null;
     setTracks([]);
     setHasMore(false);
     setLoading(true);
@@ -391,8 +472,10 @@ export function ChartsView({
         }
 
         setCharts(list);
+        chartsRef.current = list;
         const firstId = list[0]?.id ?? null;
         setActive(firstId);
+        activeRef.current = firstId;
         setProviderCharts(forProvider, list, firstId);
 
         if (!firstId) {
@@ -409,6 +492,7 @@ export function ChartsView({
         setCharts([]);
         setTracks([]);
         setActive(null);
+        activeRef.current = null;
         setHasMore(false);
         setError(String(e).replace(/^Error:\s*/, ""));
         setLoading(false);
@@ -444,17 +528,20 @@ export function ChartsView({
 
       clearDebounce();
       setActive(chartId);
+      activeRef.current = chartId;
       setProviderActive(provider, chartId);
       inflightKey.current = null;
 
       const cached = getChartPage(provider, chartId);
       if (cached && cached.tracks.length > 0) {
+        const top = resolveScroll(provider, chartId, cached.scrollTop);
         applyPage(
           provider,
           chartId,
           cached.tracks,
           cached.hasMore,
-          cached.scrollTop,
+          top,
+          { forceUi: true },
         );
         setLoading(false);
         setError(null);
@@ -496,7 +583,16 @@ export function ChartsView({
 
   const current = charts.find((c) => c.id === active);
   const showList = !loading || tracks.length > 0;
-  const playableTracks = tracksForProvider(providerId, tracks);
+  // While providerId has changed but tracks haven't swapped yet, keep showing the
+  // old list — otherwise the body collapses and scrollTop resets to 0 before we
+  // can snapshot it in the layout effect above.
+  const listOwner =
+    tracks.length > 0 &&
+    tracksOwnerRef.current &&
+    tracksOwnerRef.current !== providerId
+      ? tracksOwnerRef.current
+      : providerId;
+  const playableTracks = tracksForProvider(listOwner, tracks);
 
   return (
     <section className="panel">

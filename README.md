@@ -15,7 +15,7 @@
 | 项目 | 说明 |
 |------|------|
 | 支持平台 | macOS（Intel / Apple Silicon）、Windows x64 |
-| 当前版本 | [v0.2.0](https://github.com/kivenZhou/free-music/releases/tag/v0.2.0) |
+| 当前版本 | [v0.2.1](https://github.com/kivenZhou/free-music/releases/tag/v0.2.1) |
 | 许可证 | [MIT](./LICENSE) |
 | 发行页 | [GitHub Releases](https://github.com/kivenZhou/free-music/releases) |
 
