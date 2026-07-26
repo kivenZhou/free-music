@@ -100,6 +100,11 @@ export interface VoiceHandlers {
    * hold=false: end window; resume=true means continue playback if it was playing.
    */
   onMusicHold?: (hold: boolean, resume?: boolean) => void;
+  /**
+   * Soft-duck playback while listening for the wake word (laptop mics hear speakers).
+   * factor 1 = normal; mild reduction while listening.
+   */
+  onMusicDuck?: (factor: number) => void;
 }
 
 type SpeechRecCtor = new () => SpeechRecognitionLike;
@@ -124,17 +129,27 @@ interface SpeechRecognitionEventLike {
   }>;
 }
 
-/** Homophones / near-misses ASR often returns for 栈 */
-const ZHAN_VARIANTS = "栈站战占赞暂绽湛蘸";
+/** Homophones / near-misses ASR often returns for 栈 (esp. far-field). */
+const ZHAN_VARIANTS = "栈站战占赞暂绽湛蘸张章胀账杖";
 
 function normalize(text: string): string {
   let s = text
     .toLowerCase()
     .replace(/[\s,，。.!！?？、；;：:\-—_'"`~]/g, "");
+  // Whole-phrase ASR mangling common at a distance
+  s = s.replace(/xiao\s*zhan/gi, "小栈");
+  s = s.replace(/校长|嚣张|小镇|小江|小姜|小疆|音栈|银栈|银站|阴站|心战/g, "小栈");
   // Map 小X → 小栈 for common variants
   const re = new RegExp(`小[${ZHAN_VARIANTS}]`, "g");
   s = s.replace(re, "小栈");
+  // Collapse stutter / ASR doubles: 小栈栈 → 小栈小栈-ish handled in hasWakeWord
+  s = s.replace(/栈{2,}/g, "栈栈");
   return s;
+}
+
+function wakeFillerOnly(rest: string): boolean {
+  if (!rest) return true;
+  return /^(?:呀|啊|呢|嗯|哦|哎|欸|诶|呀啊|啊啊|嗯嗯|请|你|我说|那个)$/.test(rest);
 }
 
 function hasWakeWord(norm: string): boolean {
@@ -142,7 +157,11 @@ function hasWakeWord(norm: string): boolean {
   const parts = norm.split("小栈");
   if (parts.length >= 3) return true;
   if (/小栈{2,}/.test(norm)) return true;
-  if (/小栈栈|栈小栈|小小栈/.test(norm)) return true;
+  if (/小栈栈|栈小栈|小小栈|栈栈/.test(norm)) return true;
+  // Far-field: a single clear「小栈」with nothing else is enough to wake
+  if (countWakeTokens(norm) >= 1 && wakeFillerOnly(stripWakeWord(norm))) {
+    return true;
+  }
   return false;
 }
 
@@ -153,7 +172,11 @@ function countWakeTokens(norm: string): number {
 }
 
 function stripWakeWord(norm: string): string {
-  return norm.replace(/小栈小栈/g, "").replace(/小栈/g, "").trim();
+  return norm
+    .replace(/小栈小栈/g, "")
+    .replace(/小栈/g, "")
+    .replace(/栈栈/g, "")
+    .trim();
 }
 
 /** Longest-first aliases → provider id (normalized text). */
@@ -462,11 +485,17 @@ function extractSearchPlay(norm: string): string | null {
   return null;
 }
 
+function detectedWake(norm: string): boolean {
+  if (hasWakeWord(norm)) return true;
+  // 「小栈播放…」— single wake token as prefix (far-field often drops the repeat)
+  return countWakeTokens(norm) >= 1 && /^小栈/.test(norm);
+}
+
 export function parseVoiceText(text: string, awake: boolean): VoiceIntent | null {
   const norm = normalize(text);
   if (!norm) return null;
 
-  const woke = hasWakeWord(norm);
+  const woke = detectedWake(norm);
   const rest = woke ? stripWakeWord(norm) : norm;
 
   // Empty after wake word only
@@ -680,7 +709,7 @@ export function resolveVoiceIntent(
 
   const norm = normalize(text);
   if (!norm) return null;
-  const woke = hasWakeWord(norm);
+  const woke = detectedWake(norm);
   const rest = woke ? stripWakeWord(norm) : norm;
   if (!rest) {
     return woke || rules?.kind === "wake" ? { kind: "wake" } : null;
@@ -853,6 +882,7 @@ export class VoiceAssistant {
     }
     this.utteranceBuf = "";
     this.endMusicHold(false);
+    this.setListenDuck(false);
     this.stopWeb();
     if (this.unlistenTranscript) {
       this.unlistenTranscript();
@@ -924,8 +954,9 @@ export class VoiceAssistant {
       rec.start();
       this.handlers.onStatus?.(
         "listening",
-        `可以说「${VOICE_WAKE_WORD}」（播放中请靠近麦克风、说清楚）`,
+        `可以说「${VOICE_WAKE_WORD}」`,
       );
+      this.setListenDuck(true);
       await invoke("report_voice_web_status", {
         status: "listening",
         detail: VOICE_WAKE_WORD,
@@ -958,6 +989,7 @@ export class VoiceAssistant {
   private mapStatus(status: string, detail: string) {
     if (!this.running && status !== "stopped") return;
     if (status === "speaking") {
+      this.setListenDuck(false);
       this.handlers.onStatus?.(
         "speaking",
         detail || VOICE_WAKE_REPLY,
@@ -966,6 +998,7 @@ export class VoiceAssistant {
     }
     if (status === "listening" || status === "starting") {
       if (status === "listening" && this.isAwake()) return;
+      if (status === "listening") this.setListenDuck(true);
       this.handlers.onStatus?.(
         status === "starting" ? "starting" : "listening",
         detail || `可以说「${VOICE_WAKE_WORD}」`,
@@ -973,10 +1006,12 @@ export class VoiceAssistant {
       return;
     }
     if (status === "awake") {
+      this.setListenDuck(false);
       this.handlers.onStatus?.("awake", detail || VOICE_WAKE_REPLY);
       return;
     }
     if (status === "error") {
+      this.setListenDuck(false);
       this.endMusicHold(false);
       this.handlers.onStatus?.("error", detail || "语音助手出错");
       return;
@@ -984,6 +1019,7 @@ export class VoiceAssistant {
     if (status === "stopped") {
       this.running = false;
       this.endMusicHold(false);
+      this.setListenDuck(false);
       this.handlers.onStatus?.("stopped", detail);
     }
   }
@@ -992,6 +1028,7 @@ export class VoiceAssistant {
     if (this.holdingMusic) return;
     this.holdingMusic = true;
     this.suppressResume = false;
+    this.handlers.onMusicDuck?.(1);
     this.handlers.onMusicHold?.(true);
   }
 
@@ -1001,6 +1038,17 @@ export class VoiceAssistant {
     const shouldResume = resume && !this.suppressResume;
     this.suppressResume = false;
     this.handlers.onMusicHold?.(false, shouldResume);
+    // Resuming into wake-word listening — keep speakers quieter for the mic.
+    if (this.running && resume) this.setListenDuck(true);
+  }
+
+  private setListenDuck(active: boolean) {
+    if (this.holdingMusic) {
+      this.handlers.onMusicDuck?.(1);
+      return;
+    }
+    // Mild duck only — heavy duck made music feel broken vs loud TTS.
+    this.handlers.onMusicDuck?.(active ? 0.55 : 1);
   }
 
   private scheduleCommandWindow(ms: number) {
@@ -1010,6 +1058,7 @@ export class VoiceAssistant {
       if (!this.running) return;
       if (Date.now() >= this.awakeUntil) {
         this.endMusicHold(true);
+        this.setListenDuck(true);
         this.handlers.onStatus?.(
           "listening",
           `可以说「${VOICE_WAKE_WORD}」`,
@@ -1275,7 +1324,7 @@ export class VoiceAssistant {
 
     const echoNorm = normalize(trimmed);
     if (
-      !hasWakeWord(echoNorm) &&
+      !detectedWake(echoNorm) &&
       (/^(?:在呢|我在你说|我在|你说|收到|好的|已暂停|音量已调大|音量已调小|搜索失败|请说指令|没听清)/.test(
         echoNorm,
       ) ||
@@ -1305,8 +1354,10 @@ export class VoiceAssistant {
         const tokens = countWakeTokens(norm);
         if (tokens > 0) {
           this.wakeHits += tokens;
-          this.wakeHitResetAt = now + 2200;
-          if (this.wakeHits >= 2 && !stripWakeWord(norm)) {
+          this.wakeHitResetAt = now + 4000;
+          const rest = stripWakeWord(norm);
+          // One solid wake token (or accumulated 小栈) with no command body → wake.
+          if (wakeFillerOnly(rest) && (tokens >= 1 || this.wakeHits >= 1)) {
             this.clearEndpointTimer();
             this.utteranceBuf = "";
             this.triggerWake();

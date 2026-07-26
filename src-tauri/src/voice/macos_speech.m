@@ -17,6 +17,8 @@ static BOOL g_running = NO;
 static BOOL g_restarting = NO;
 static BOOL g_speaking = NO;
 static NSTimer *g_segment_timer = nil;
+/// EMA of input RMS for smooth far-field AGC (laptop mics are near-field).
+static float g_agc_rms = 0.02f;
 
 static AVSpeechSynthesizer *g_synth = nil;
 
@@ -81,7 +83,8 @@ static void start_recognition_session(void);
 static void schedule_restart(void) {
   if (!g_running || g_restarting || g_speaking) return;
   g_restarting = YES;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+  // Short gap — long blind spots make far-field wake feel "deaf".
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
                  dispatch_get_main_queue(), ^{
                    g_restarting = NO;
                    if (g_running && !g_speaking) {
@@ -90,7 +93,24 @@ static void schedule_restart(void) {
                  });
 }
 
-/// Soft AGC: lift quiet speech without hard clipping that destroys ASR.
+static BOOL text_looks_like_wake(NSString *text) {
+  if (text.length == 0) return NO;
+  NSString *s = [[text lowercaseString]
+      stringByReplacingOccurrencesOfString:@" "
+                                 withString:@""];
+  // Keep in sync with frontend normalize / wake heuristics.
+  NSArray<NSString *> *needles = @[
+    @"小栈", @"小站", @"小战", @"小占", @"小赞", @"小张", @"小章", @"校长",
+    @"嚣张", @"小镇", @"小江", @"音栈", @"银站", @"xiaozhan"
+  ];
+  for (NSString *n in needles) {
+    if ([s containsString:n]) return YES;
+  }
+  return NO;
+}
+
+/// Soft AGC tuned for laptop far-field wake words (not smart-speaker arrays).
+/// Uses EMA level tracking + higher max gain so quieter distant speech reaches ASR.
 static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   if (!buffer.floatChannelData || buffer.frameLength == 0) return;
   const AVAudioFrameCount frames = buffer.frameLength;
@@ -110,12 +130,28 @@ static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   }
   if (n == 0) return;
   float rms = (float)sqrt(sumSq / (double)n);
-  if (rms < 0.003f) return; // silence / noise floor — don't boost hiss
 
-  const float target = 0.11f;
-  float gain = target / rms;
+  // Absolute digital silence — skip (don't chase noise floor).
+  if (rms < 0.00025f) return;
+
+  // Fast attack / slow release so speech onset gets boosted quickly.
+  const float attack = 0.45f;
+  const float release = 0.04f;
+  if (rms > g_agc_rms) {
+    g_agc_rms += (rms - g_agc_rms) * attack;
+  } else {
+    g_agc_rms += (rms - g_agc_rms) * release;
+  }
+
+  float level = g_agc_rms;
+  if (level < 0.0008f) level = 0.0008f;
+
+  // Hotter target for distant / quiet wake words.
+  const float target = 0.28f;
+  float gain = target / level;
   if (gain < 1.0f) gain = 1.0f;
-  if (gain > 1.75f) gain = 1.75f;
+  // ~26 dB ceiling for built-in mics a few meters away.
+  if (gain > 20.0f) gain = 20.0f;
 
   for (UInt32 ch = 0; ch < chCount; ch++) {
     float *samples = buffer.floatChannelData[ch];
@@ -123,8 +159,8 @@ static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
     for (AVAudioFrameCount i = 0; i < frames; i++) {
       float v = samples[i] * gain;
       // Soft knee limiter
-      if (v > 0.95f) v = 0.95f + (v - 0.95f) * 0.15f;
-      if (v < -0.95f) v = -0.95f + (v + 0.95f) * 0.15f;
+      if (v > 0.90f) v = 0.90f + (v - 0.90f) * 0.10f;
+      if (v < -0.90f) v = -0.90f + (v + 0.90f) * 0.10f;
       if (v > 1.f) v = 1.f;
       if (v < -1.f) v = -1.f;
       samples[i] = v;
@@ -142,12 +178,16 @@ static void start_recognition_session(void) {
     return;
   }
 
+  // Bias AGC toward boosting; quiet far-field speech adapts from here.
+  g_agc_rms = 0.004f;
   g_request = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
   g_request.shouldReportPartialResults = YES;
-  g_request.taskHint = SFSpeechRecognitionTaskHintConfirmation;
+  // Dictation is better than Confirmation for continuous wake-word listening.
+  g_request.taskHint = SFSpeechRecognitionTaskHintDictation;
   g_request.contextualStrings = @[
-    @"小栈小栈", @"小栈", @"继续", @"继续播放", @"暂停", @"下一首", @"上一首",
-    @"换一首", @"帮我播放", @"我想听", @"播放", @"静音", @"大声点", @"小声点",
+    @"小栈小栈", @"小栈", @"小站小站", @"小站", @"小张小张", @"校长校长",
+    @"继续", @"继续播放", @"暂停", @"下一首", @"上一首", @"换一首",
+    @"帮我播放", @"我想听", @"播放", @"静音", @"大声点", @"小声点",
     @"切歌", @"停止", @"来一首"
   ];
   if (@available(macOS 13.0, *)) {
@@ -160,8 +200,9 @@ static void start_recognition_session(void) {
     return;
   }
 
+  // Larger tap buffers → stabler RMS for AGC on quiet far-field speech.
   [g_engine.inputNode installTapOnBus:0
-                           bufferSize:1024
+                           bufferSize:4096
                                format:format
                                 block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
                                   (void)when;
@@ -185,8 +226,20 @@ static void start_recognition_session(void) {
                    resultHandler:^(SFSpeechRecognitionResult *result, NSError *error) {
                      if (g_speaking) return;
                      if (result) {
-                       emit_transcript(result.bestTranscription.formattedString,
-                                       result.isFinal);
+                       NSString *best =
+                           result.bestTranscription.formattedString ?: @"";
+                       // Far-field: best hypothesis often mangles the wake word —
+                       // prefer any alternative that still looks like「小栈…」.
+                       if (!text_looks_like_wake(best)) {
+                         for (SFTranscription *alt in result.transcriptions) {
+                           NSString *t = alt.formattedString ?: @"";
+                           if (text_looks_like_wake(t)) {
+                             best = t;
+                             break;
+                           }
+                         }
+                       }
+                       emit_transcript(best, result.isFinal);
                      }
                      if (error) {
                        if (g_running && !g_speaking) {
@@ -199,8 +252,9 @@ static void start_recognition_session(void) {
                      }
                    }];
 
+  // Longer window so distant / slower phrases aren't cut mid-utterance.
   g_segment_timer =
-      [NSTimer scheduledTimerWithTimeInterval:4.0
+      [NSTimer scheduledTimerWithTimeInterval:12.0
                                       repeats:NO
                                         block:^(__unused NSTimer *timer) {
                                           if (!g_running || g_speaking) return;
@@ -210,7 +264,7 @@ static void start_recognition_session(void) {
                                           schedule_restart();
                                         }];
 
-  emit_status("listening", @"正在聆听「小栈小栈」");
+  emit_status("listening", @"正在聆听「小栈」或「小栈小栈」");
 }
 
 /// Prefer natural Mandarin: Yu-shu / Siri female, Premium > Enhanced > Default.
@@ -329,7 +383,8 @@ int voice_macos_speak(const char *text_utf8) {
     // Natural pace: a bit slower than default, normal pitch (no cartoon boost).
     utt.rate = AVSpeechUtteranceDefaultSpeechRate * 0.84f;
     utt.pitchMultiplier = 1.0f;
-    utt.volume = 1.0f;
+    // Below full blast so replies don't dwarf ducked music.
+    utt.volume = 0.72f;
     utt.preUtteranceDelay = 0.08;
     utt.postUtteranceDelay = 0.12;
     [g_synth speakUtterance:utt];

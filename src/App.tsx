@@ -365,6 +365,8 @@ function App() {
   }>({ status: "off", detail: "" });
   const voiceRef = useRef<VoiceAssistant | null>(null);
   const voiceHoldPlayingRef = useRef(false);
+  /** Soft-duck factor while voice assistant listens for wake word (1 = full). */
+  const voiceDuckRef = useRef(1);
   /** Last voice catalog feed — used by「追加N首」. */
   const voiceFeedRef = useRef<{
     mode: "search" | "chart" | "none";
@@ -600,8 +602,16 @@ function App() {
 
   const applyVolume = useCallback((vol: number, isMuted: boolean) => {
     const audio = audioRef.current;
-    if (audio) audio.volume = isMuted ? 0 : vol;
+    if (audio) audio.volume = isMuted ? 0 : vol * voiceDuckRef.current;
   }, []);
+
+  const onVoiceMusicDuck = useCallback(
+    (factor: number) => {
+      voiceDuckRef.current = Math.min(1, Math.max(0.08, factor));
+      applyVolume(volume, muted);
+    },
+    [applyVolume, volume, muted],
+  );
 
   const playTrackAt = useCallback(async (tracks: Track[], index: number) => {
     const track = tracks[index];
@@ -1505,6 +1515,7 @@ function App() {
       onPlayFavorites: () => voicePlayFavorites(),
       onStatus: (status, detail) => setVoiceUi({ status, detail }),
       onMusicHold: onVoiceMusicHold,
+      onMusicDuck: onVoiceMusicDuck,
     });
   }, [
     playNext,
@@ -1512,6 +1523,7 @@ function App() {
     togglePlay,
     toggleMute,
     onVoiceMusicHold,
+    onVoiceMusicDuck,
     voiceSearchPlay,
     voiceThemePlay,
     voiceAppendTracks,
