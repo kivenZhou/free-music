@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, PlayUrl, Playability, Track};
+use crate::models::{AudioQuality, Chart, PlayUrl, Playability, Track};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde_json::Value;
@@ -201,9 +201,14 @@ impl NeteaseProvider {
     }
 
     /// Official anonymous player URL API (works for free / fee=8 tracks).
-    async fn fetch_official_url(&self, track_id: &str) -> Result<Option<(String, u64)>, ProviderError> {
+    async fn fetch_official_url(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<Option<(String, u64)>, ProviderError> {
+        let br = quality.netease_br();
         let url = format!(
-            "https://music.163.com/api/song/enhance/player/url?ids=[{}]&br=320000",
+            "https://music.163.com/api/song/enhance/player/url?ids=[{}]&br={br}",
             track_id
         );
         let resp = self.client.get(&url).send().await?;
@@ -314,14 +319,18 @@ impl NeteaseProvider {
         Ok((lrc, tlyric))
     }
 
-    async fn resolve_play_candidates(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+    async fn resolve_play_candidates(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
         let cached = self.cache_dir.join(format!("{track_id}.mp3"));
         if cached.exists() {
             if let Ok(meta) = std::fs::metadata(&cached) {
                 if meta.len() > 64 * 1024 {
                     // Still try to expose a remote URL for reference, but play from cache.
                     let remote = self
-                        .fetch_official_url(track_id)
+                        .fetch_official_url(track_id, quality)
                         .await
                         .ok()
                         .flatten()
@@ -339,7 +348,7 @@ impl NeteaseProvider {
         }
 
         // 1) Official API — stream first, warm cache in background
-        if let Some((remote, br)) = self.fetch_official_url(track_id).await? {
+        if let Some((remote, br)) = self.fetch_official_url(track_id, quality).await? {
             self.spawn_cache(track_id, &remote);
             return Ok(PlayUrl {
                 url: remote,
@@ -467,8 +476,12 @@ impl MusicProvider for NeteaseProvider {
         Ok(tracks)
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
-        self.resolve_play_candidates(track_id).await
+    async fn play_url(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
+        self.resolve_play_candidates(track_id, quality).await
     }
 
     async fn lyrics(

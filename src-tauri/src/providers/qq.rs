@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, PlayUrl, Playability, Track};
+use crate::models::{AudioQuality, Chart, PlayUrl, Playability, Track};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, REFERER, USER_AGENT};
 use serde_json::{json, Value};
@@ -31,12 +31,34 @@ fn is_junk_keyword_title(title: &str) -> bool {
 }
 
 /// Quality ladder for anonymous play. Prefer widely free formats first.
-const QUALITIES: &[(&str, &str)] = &[
+const QUALITIES_STANDARD: &[(&str, &str)] = &[
     ("M500", "mp3"), // 128kbps — most free tracks
     ("C400", "m4a"),
     ("C200", "m4a"),
     ("M800", "mp3"), // 320 — sometimes free, often VIP
 ];
+
+const QUALITIES_HIGH: &[(&str, &str)] = &[
+    ("M500", "mp3"),
+    ("M800", "mp3"),
+    ("C400", "m4a"),
+    ("C200", "m4a"),
+];
+
+const QUALITIES_HIGHEST: &[(&str, &str)] = &[
+    ("M800", "mp3"),
+    ("M500", "mp3"),
+    ("C400", "m4a"),
+    ("C200", "m4a"),
+];
+
+fn qualities_for(q: AudioQuality) -> &'static [(&'static str, &'static str)] {
+    match q {
+        AudioQuality::Standard => QUALITIES_STANDARD,
+        AudioQuality::High => QUALITIES_HIGH,
+        AudioQuality::Highest => QUALITIES_HIGHEST,
+    }
+}
 
 pub struct QqProvider {
     client: reqwest::Client,
@@ -296,11 +318,15 @@ impl QqProvider {
         Ok((purl, sip))
     }
 
-    async fn resolve_play_url(&self, track_id: &str) -> Result<(String, String), ProviderError> {
+    async fn resolve_play_url(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<(String, String), ProviderError> {
         let (songmid, media_mid) = Self::split_ids(track_id);
         let mut tried = Vec::new();
 
-        for (prefix, ext) in QUALITIES {
+        for (prefix, ext) in qualities_for(quality) {
             for mid_part in [media_mid, songmid] {
                 let filename = format!("{prefix}{mid_part}{mid_part}.{ext}");
                 if tried.iter().any(|t| t == &filename) {
@@ -491,7 +517,11 @@ impl MusicProvider for QqProvider {
         Ok(tracks)
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+    async fn play_url(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
         let (songmid, _) = Self::split_ids(track_id);
         for ext in ["mp3", "m4a"] {
             let cached = self.cache_dir.join(format!("qq_{songmid}.{ext}"));
@@ -510,8 +540,8 @@ impl MusicProvider for QqProvider {
             }
         }
 
-        let (remote, quality) = self.resolve_play_url(track_id).await?;
-        let ext = if quality.contains("mp3") { "mp3" } else { "m4a" };
+        let (remote, quality_label) = self.resolve_play_url(track_id, quality).await?;
+        let ext = if quality_label.contains("mp3") { "mp3" } else { "m4a" };
 
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
@@ -527,7 +557,7 @@ impl MusicProvider for QqProvider {
             url: remote,
             local_path: None,
             playability: Playability::Full,
-            quality: Some(quality),
+            quality: Some(quality_label),
             expires_hint: Some("stream".into()),
         })
     }

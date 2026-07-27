@@ -1,9 +1,20 @@
-import type { ProviderInfo, RepeatMode, Track } from "./types";
+import type { AudioQuality, ProviderInfo, RepeatMode, Track } from "./types";
 
 export const QUEUE_STORAGE_KEY = "yinzhan-queue-v1";
 export const PROVIDER_ORDER_KEY = "yinzhan-provider-order";
+export const AUDIO_QUALITY_KEY = "yinzhan-audio-quality";
 export const NORMAL_MIN = { width: 900, height: 600 };
 export const MINI_SIZE = { width: 480, height: 96 };
+
+export const AUDIO_QUALITY_OPTIONS: {
+  id: AudioQuality;
+  label: string;
+  hint: string;
+}[] = [
+  { id: "standard", label: "标准", hint: "约 128kbps，省流量" },
+  { id: "high", label: "较高", hint: "约 192–320kbps" },
+  { id: "highest", label: "最高", hint: "优先最高可用免费音质" },
+];
 
 export function loadProviderOrder(): string[] {
   try {
@@ -58,6 +69,36 @@ export function readStoredRepeat(): RepeatMode {
   const raw = localStorage.getItem("yinzhan-repeat-v2");
   if (raw === "all" || raw === "one" || raw === "off") return raw;
   return "all";
+}
+
+export function readStoredAudioQuality(): AudioQuality {
+  const raw = localStorage.getItem(AUDIO_QUALITY_KEY);
+  if (raw === "standard" || raw === "high" || raw === "highest") return raw;
+  return "high";
+}
+
+export function writeStoredAudioQuality(q: AudioQuality) {
+  localStorage.setItem(AUDIO_QUALITY_KEY, q);
+}
+
+export function audioQualityLabel(q: AudioQuality): string {
+  return AUDIO_QUALITY_OPTIONS.find((o) => o.id === q)?.label ?? q;
+}
+
+/** Humanize provider-reported quality strings for the player bar. */
+export function formatStreamQuality(raw?: string | null): string | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (!s || s === "cache" || s === "outer" || s === "default") return null;
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    if (n >= 1000) return `${Math.round(n / 1000)}kbps`;
+    if (n > 0) return `${n}kbps`;
+  }
+  if (/^\d+k(mp3|flac)?$/i.test(s)) return s.toLowerCase();
+  if (/^M\d+/i.test(s) || /^C\d+/i.test(s)) return s;
+  if (s === "HQ" || s === "hq") return "HQ";
+  return s;
 }
 
 export function shuffleTracks(list: Track[], preferIndex = 0): Track[] {

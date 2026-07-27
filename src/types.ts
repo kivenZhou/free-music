@@ -72,3 +72,14 @@ export type NavKey =
   | "settings";
 
 export type RepeatMode = "off" | "all" | "one";
+
+/** App chrome theme. */
+export type ThemeMode = "dark" | "light";
+
+/**
+ * Preferred stream bitrate. Providers fall back when a tier is unavailable.
+ * - standard ≈ 128kbps
+ * - high ≈ 192–320kbps
+ * - highest tries the best free tier first
+ */
+export type AudioQuality = "standard" | "high" | "highest";

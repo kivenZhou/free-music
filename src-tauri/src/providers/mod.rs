@@ -14,7 +14,7 @@ pub use lrclib::LrclibClient;
 pub use netease::NeteaseProvider;
 pub use qq::QqProvider;
 
-use crate::models::{Chart, PlayUrl, Track};
+use crate::models::{Chart, PlayUrl, Track, AudioQuality};
 use async_trait::async_trait;
 use futures::future::join_all;
 use std::path::PathBuf;
@@ -42,7 +42,11 @@ pub trait MusicProvider: Send + Sync {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Track>, ProviderError>;
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError>;
+    async fn play_url(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError>;
     /// Optional synced lyrics (LRC). Default: unsupported.
     async fn lyrics(
         &self,
@@ -285,9 +289,10 @@ impl ProviderRegistry {
         provider: &str,
         hint_title: Option<&str>,
         hint_artist: Option<&str>,
+        quality: AudioQuality,
     ) -> Result<PlayUrl, ProviderError> {
         if let Some(p) = self.get(provider) {
-            if let Ok(url) = p.play_url(track_id).await {
+            if let Ok(url) = p.play_url(track_id, quality).await {
                 return Ok(url);
             }
         }
@@ -310,7 +315,7 @@ impl ProviderRegistry {
                                 continue;
                             }
                         }
-                        if let Ok(url) = p.play_url(&t.id).await {
+                        if let Ok(url) = p.play_url(&t.id, quality).await {
                             return Ok(url);
                         }
                     }

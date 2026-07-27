@@ -44,7 +44,7 @@ import {
   type ProviderHealthEntry,
 } from "./providerHealth";
 import type { Update } from "@tauri-apps/plugin-updater";
-import type { FavoriteItem, NavKey, ProviderInfo, Track } from "./types";
+import type { FavoriteItem, NavKey, ProviderInfo, ThemeMode, Track } from "./types";
 import { checkForInstallableUpdate } from "./updater";
 import {
   readVoiceEnabled,
@@ -65,9 +65,16 @@ import {
   MINI_SIZE,
   NORMAL_MIN,
   PROVIDER_ORDER_KEY,
+  formatStreamQuality,
   loadProviderOrder,
   sortProvidersByOrder,
 } from "./playerUtils";
+import {
+  applyDocumentTheme,
+  readStoredTheme,
+  syncWindowTheme,
+  writeStoredTheme,
+} from "./theme";
 import {
   listenDesktopLyricsClosed,
   listenDesktopLyricsDock,
@@ -80,6 +87,7 @@ import "./App.css";
 
 function App() {
   const [nav, setNav] = useState<NavKey>("charts");
+  const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerId, setProviderId] = useState(
     () => localStorage.getItem("yinzhan-provider") || "netease",
@@ -121,6 +129,8 @@ function App() {
     volume,
     muted,
     autoSkip,
+    audioQuality,
+    streamQuality,
     currentKey,
     hasPrev,
     hasNext,
@@ -149,6 +159,7 @@ function App() {
     setMuted,
     toggleMute,
     setAutoSkip,
+    setAudioQuality,
     setQueue,
     onVoiceMusicDuck,
     onVoiceMusicHold,
@@ -214,11 +225,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // Match app chrome so resize / mini expand never flashes system white.
-    void getCurrentWindow()
-      .setBackgroundColor("#141210")
-      .catch(() => undefined);
-  }, []);
+    applyDocumentTheme(theme);
+    writeStoredTheme(theme);
+    void syncWindowTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     // Restore mini geometry, or keep normal-mode floor after allowing smaller mini window in conf.
@@ -1356,6 +1366,10 @@ function App() {
             onRefreshHealth={refreshProviderHealth}
             autoSkip={autoSkip}
             onAutoSkip={setAutoSkip}
+            theme={theme}
+            onTheme={setTheme}
+            audioQuality={audioQuality}
+            onAudioQuality={setAudioQuality}
             voiceEnabled={voiceEnabled}
             onVoiceEnabled={onVoiceEnabled}
             voiceStatusText={
@@ -1447,6 +1461,7 @@ function App() {
               ? current.durationMs / 1000
               : 0
         }
+        streamQuality={formatStreamQuality(streamQuality)}
         hasPrev={hasPrev}
         hasNext={hasNext}
         favorited={currentKey ? favoriteKeys.has(currentKey) : false}

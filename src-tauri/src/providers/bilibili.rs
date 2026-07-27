@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, Playability, PlayUrl, Track};
+use crate::models::{AudioQuality, Chart, Playability, PlayUrl, Track};
 use async_trait::async_trait;
 use reqwest::cookie::Jar;
 use reqwest::Client;
@@ -33,6 +33,35 @@ const CHARTS: &[(&str, &str, &str, &str)] = &[
     ("bili_acg", "二次元", "bilibili", "ACG神曲全收录"),
     ("bili_elec", "抖腿电音", "bilibili", "超燃电音与鬼畜"),
 ];
+
+/// Non-music clutter that floods the「最新音乐」search chart (tutorials / upload guides / stems).
+fn is_bili_new_junk(title: &str) -> bool {
+    let t = title.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "教程",
+        "攻略",
+        "干货",
+        "指南",
+        "教你",
+        "如何上传",
+        "怎么上传",
+        "一键上传",
+        "上传版权",
+        "上传音乐",
+        "上传无版权",
+        "上传普通音质",
+        "别再上传",
+        "无版权歌曲",
+        "suno",
+        "伴奏",
+        "消音",
+        "纯伴奏",
+        "karaoke",
+        "卡拉ok",
+        "铃声",
+    ];
+    NEEDLES.iter().any(|n| t.contains(&n.to_ascii_lowercase()))
+}
 
 impl BilibiliProvider {
     pub fn new(cache_dir: PathBuf) -> Self {
@@ -684,8 +713,18 @@ impl MusicProvider for BilibiliProvider {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Track>, ProviderError> {
+        // 「最新上传 音乐」里的「上传」会大量命中上传教程 / Suno 指南，单独处理。
+        if chart_id == "bili_new" {
+            let fetch = (limit.saturating_mul(4)).clamp(limit.max(24), 80);
+            let candidates = self.search_raw("流行歌曲", fetch, offset, true).await?;
+            return Ok(candidates
+                .into_iter()
+                .filter(|t| !is_bili_new_junk(&t.title))
+                .take(limit as usize)
+                .collect());
+        }
+
         let kw = match chart_id {
-            "bili_new" => "最新上传 音乐",
             "bili_cover" => "翻唱",
             "bili_acg" => "二次元 音乐",
             "bili_elec" => "抖腿 电音",
@@ -702,7 +741,11 @@ impl MusicProvider for BilibiliProvider {
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+    async fn play_url(
+        &self,
+        track_id: &str,
+        _quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
         let (remotes, duration_secs) = self.get_play_info(track_id).await?;
         let path = self.cache_path(track_id);
         let min_bytes = Self::min_bytes_for_duration(duration_secs.max(30));
@@ -728,5 +771,21 @@ impl MusicProvider for BilibiliProvider {
             quality: Some("HQ".into()),
             expires_hint: Some("cached".into()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_bili_new_junk;
+
+    #[test]
+    fn filters_upload_tutorials_and_stems() {
+        assert!(is_bili_new_junk("经典歌曲如何上传Suno编曲?"));
+        assert!(is_bili_new_junk("suno 一键上传版权音乐!"));
+        assert!(is_bili_new_junk("教你如何在网易云音乐上传无版权歌曲"));
+        assert!(is_bili_new_junk("【教程】别再上传普通音质了！"));
+        assert!(is_bili_new_junk("[伴奏]梦幻上升_Mew Rage Up!"));
+        assert!(!is_bili_new_junk("至少还有你"));
+        assert!(!is_bili_new_junk("夜曲 · 周杰伦"));
     }
 }

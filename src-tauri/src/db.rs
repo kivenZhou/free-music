@@ -4,7 +4,7 @@ use crate::models::{
 };
 use directories::ProjectDirs;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use thiserror::Error;
 
@@ -29,9 +29,15 @@ pub struct Database {
 impl Database {
     pub fn open_default() -> Result<Self, DbError> {
         let dirs = ProjectDirs::from("com", "zzy", "yinzhan").ok_or(DbError::NoDirs)?;
-        let data_dir = dirs.data_dir();
+        // Prefer *local* data dir. On Windows, `data_dir()` is Roaming AppData —
+        // domain/OneDrive roaming can replace or corrupt SQLite and look like
+        // "reinstall wiped favorites". macOS uses the same path for both.
+        let data_dir = dirs.data_local_dir();
         std::fs::create_dir_all(data_dir)?;
         let path = data_dir.join("yinzhan.db");
+        if !path.exists() {
+            migrate_legacy_db(&dirs, &path);
+        }
         Self::open_path(path)
     }
 
@@ -411,5 +417,89 @@ impl Database {
         let conn = self.conn.lock().expect("db lock");
         conn.execute("DELETE FROM play_history", [])?;
         Ok(())
+    }
+}
+
+/// Copy SQLite main + WAL/SHM sidecars from the first existing legacy location.
+fn migrate_legacy_db(dirs: &ProjectDirs, target: &Path) {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    let push_unique = |list: &mut Vec<PathBuf>, p: PathBuf| {
+        if p != target && !list.iter().any(|x| *x == p) {
+            list.push(p);
+        }
+    };
+
+    // Previous primary: Roaming `data_dir` on Windows (same as local on macOS).
+    push_unique(&mut candidates, dirs.data_dir().join("yinzhan.db"));
+
+    // Layouts without the `\data` segment.
+    if let Some(parent) = dirs.data_dir().parent() {
+        push_unique(&mut candidates, parent.join("yinzhan.db"));
+    }
+    if let Some(parent) = dirs.data_local_dir().parent() {
+        push_unique(&mut candidates, parent.join("yinzhan.db"));
+    }
+
+    // Windows: also check Tauri bundle-id folders and known AppData roots.
+    #[cfg(windows)]
+    {
+        for env_key in ["APPDATA", "LOCALAPPDATA"] {
+            let Ok(root) = std::env::var(env_key) else {
+                continue;
+            };
+            let root = PathBuf::from(root);
+            push_unique(
+                &mut candidates,
+                root.join("com.zzy.yinzhan").join("yinzhan.db"),
+            );
+            push_unique(
+                &mut candidates,
+                root.join("com.zzy.yinzhan").join("data").join("yinzhan.db"),
+            );
+            push_unique(
+                &mut candidates,
+                root.join("zzy").join("yinzhan").join("yinzhan.db"),
+            );
+            push_unique(
+                &mut candidates,
+                root.join("zzy")
+                    .join("yinzhan")
+                    .join("data")
+                    .join("yinzhan.db"),
+            );
+        }
+    }
+
+    for src in candidates {
+        if !src.exists() {
+            continue;
+        }
+        // Skip empty placeholders.
+        if src.metadata().map(|m| m.len()).unwrap_or(0) < 64 {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if std::fs::copy(&src, target).is_err() {
+            continue;
+        }
+        for suffix in ["-wal", "-shm"] {
+            let mut side = src.as_os_str().to_owned();
+            side.push(suffix);
+            let side = PathBuf::from(side);
+            if side.exists() {
+                let mut dest = target.as_os_str().to_owned();
+                dest.push(suffix);
+                let _ = std::fs::copy(&side, PathBuf::from(dest));
+            }
+        }
+        eprintln!(
+            "[yinzhan] migrated local database from {} → {}",
+            src.display(),
+            target.display()
+        );
+        break;
     }
 }

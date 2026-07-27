@@ -8,15 +8,17 @@ import {
 } from "./playErrors";
 import { recordProviderFail, recordProviderOk } from "./providerHealth";
 import { favKey } from "./trackMatch";
-import type { RepeatMode, Track } from "./types";
+import type { AudioQuality, RepeatMode, Track } from "./types";
 import {
   QUEUE_STORAGE_KEY,
   clampSeekTime,
   loadStoredQueue,
   playbackDuration,
+  readStoredAudioQuality,
   readStoredRepeat,
   readStoredVolume,
   shuffleTracks,
+  writeStoredAudioQuality,
 } from "./playerUtils";
 
 export type UsePlayerOptions = {
@@ -53,6 +55,10 @@ export function usePlayer(options: UsePlayerOptions = {}) {
   const [autoSkip, setAutoSkip] = useState(
     () => localStorage.getItem("yinzhan-auto-skip") !== "0",
   );
+  const [audioQuality, setAudioQualityState] = useState<AudioQuality>(
+    readStoredAudioQuality,
+  );
+  const [streamQuality, setStreamQuality] = useState<string | null>(null);
 
   const queueReadyRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -60,6 +66,7 @@ export function usePlayer(options: UsePlayerOptions = {}) {
   const queueIndexRef = useRef(storedQueue?.index ?? -1);
   const shuffleRef = useRef(false);
   const repeatRef = useRef<RepeatMode>(readStoredRepeat());
+  const audioQualityRef = useRef<AudioQuality>(readStoredAudioQuality());
   const playGenRef = useRef(0);
   const failSkipRef = useRef(0);
   const autoSkipRef = useRef(true);
@@ -93,6 +100,11 @@ export function usePlayer(options: UsePlayerOptions = {}) {
   useEffect(() => {
     repeatRef.current = repeatMode;
   }, [repeatMode]);
+
+  useEffect(() => {
+    audioQualityRef.current = audioQuality;
+    writeStoredAudioQuality(audioQuality);
+  }, [audioQuality]);
 
   useEffect(() => {
     autoSkipRef.current = autoSkip;
@@ -153,6 +165,7 @@ export function usePlayer(options: UsePlayerOptions = {}) {
     suppressTimeRef.current = true;
     setProgress(0);
     setDuration(track.durationMs ? track.durationMs / 1000 : 0);
+    setStreamQuality(null);
     // Soft stop only — removeAttribute+load tears down WebKit's audio unit and
     // races macOS CoreAudio / AVAudioEngine (voice mic), causing SIGSEGV.
     try {
@@ -162,8 +175,9 @@ export function usePlayer(options: UsePlayerOptions = {}) {
     }
 
     try {
-      const resolved = await api.resolvePlayUrl(track);
+      const resolved = await api.resolvePlayUrl(track, audioQualityRef.current);
       if (gen !== playGenRef.current) return;
+      setStreamQuality(resolved.quality ?? null);
       const src = resolved.localPath
         ? convertFileSrc(resolved.localPath)
         : resolved.url;
@@ -548,6 +562,18 @@ export function usePlayer(options: UsePlayerOptions = {}) {
     setRepeatMode((m) => (m === "off" ? "all" : m === "all" ? "one" : "off"));
   }, []);
 
+  const setAudioQuality = useCallback((q: AudioQuality) => {
+    setAudioQualityState(q);
+    audioQualityRef.current = q;
+    writeStoredAudioQuality(q);
+    // Re-resolve current track so the new preference applies immediately.
+    const qTracks = queueRef.current;
+    const qi = queueIndexRef.current;
+    if (qi >= 0 && qTracks[qi]) {
+      void playTrackAtRef.current(qTracks, qi);
+    }
+  }, []);
+
   const setVolumeSafe = useCallback((v: number) => {
     const clamped = Math.min(1, Math.max(0, v));
     setVolume(clamped);
@@ -579,6 +605,8 @@ export function usePlayer(options: UsePlayerOptions = {}) {
     volume,
     muted,
     autoSkip,
+    audioQuality,
+    streamQuality,
     currentKey,
     hasPrev,
     hasNext,
@@ -608,6 +636,7 @@ export function usePlayer(options: UsePlayerOptions = {}) {
     setMuted,
     toggleMute,
     setAutoSkip,
+    setAudioQuality,
     setQueue: setQueueAndRef,
     applyVolume,
     onVoiceMusicDuck,

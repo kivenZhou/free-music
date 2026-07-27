@@ -51,6 +51,37 @@
     hsla(0, 0%, 100%, 0.42) 100%
   );
 
+  --cover-bg: #2a2520;
+  --cover-fallback: linear-gradient(145deg, #3a3228 0%, #221e19 100%);
+  --input-fill: rgba(0, 0, 0, 0.25);
+  --player-bar-bg: rgba(16, 13, 11, 0.72);
+  --player-top-line: rgba(255, 255, 255, 0.1);
+  --overlay-scrim: rgba(0, 0, 0, 0.45);
+  --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.45);
+
+  /* Text on solid accent (play / chips / tabs) */
+  --accent-ink: #1a140c;
+  --accent-ink-soft: rgba(26, 20, 12, 0.65);
+  /* Filled primary controls (play-all / play / search) */
+  --btn-solid-bg: var(--accent);
+  --btn-solid-bg-hover: var(--accent-hover);
+  --btn-solid-ink: var(--accent-ink);
+  /* Selected chip / tab fill */
+  --chip-on-bg: var(--accent);
+  --chip-on-ink: var(--accent-ink);
+  --chip-on-muted: var(--accent-ink-soft);
+  /* Unfilled seek / volume rail */
+  --track-rail: rgba(255, 255, 255, 0.14);
+  /* Song list cards */
+  --row-bg: rgba(255, 255, 255, 0.015);
+  --row-border: rgba(255, 255, 255, 0.04);
+  --row-border-hover: rgba(232, 168, 74, 0.18);
+  --row-border-active: rgba(232, 168, 74, 0.32);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+  --app-glow-1: rgba(232, 168, 74, 0.08);
+  --app-glow-2: rgba(90, 70, 40, 0.18);
+
   /* legacy aliases used by components */
   --ink: var(--text);
   --ink-soft: var(--text-soft);
@@ -66,6 +97,72 @@
   --text-primary: var(--text);
   --text-secondary: var(--text-soft);
   --text-tertiary: var(--text-dim);
+}
+
+[data-theme="light"] {
+  --bg: #f7f4ee;
+  --bg-elevated: #ffffff;
+  --bg-sidebar: #efeae1;
+  --bg-row-hover: rgba(26, 20, 12, 0.06);
+  --bg-row-active: rgba(180, 118, 28, 0.12);
+
+  --line: rgba(26, 20, 12, 0.12);
+  --line-strong: rgba(26, 20, 12, 0.2);
+
+  --text: #1a1612;
+  --text-soft: rgba(26, 22, 18, 0.7);
+  --text-dim: rgba(26, 22, 18, 0.45);
+
+  --accent: #b8731e;
+  --accent-soft: rgba(184, 115, 30, 0.14);
+  --accent-hover: #c9842a;
+  --danger: #c45a4e;
+
+  --glass-fill: hsla(32, 16%, 22%, 0.06);
+  --glass-fill-hover: hsla(32, 16%, 22%, 0.1);
+  --glass-rim: linear-gradient(
+    145deg,
+    hsla(40, 30%, 100%, 0.95) 0%,
+    hsla(30, 12%, 40%, 0.14) 35%,
+    hsla(30, 12%, 40%, 0.08) 50%,
+    hsla(30, 12%, 40%, 0.14) 65%,
+    hsla(40, 30%, 100%, 0.8) 100%
+  );
+  --glass-rim-hover: linear-gradient(
+    145deg,
+    hsla(40, 30%, 100%, 1) 0%,
+    hsla(30, 12%, 40%, 0.18) 35%,
+    hsla(30, 12%, 40%, 0.1) 50%,
+    hsla(30, 12%, 40%, 0.18) 65%,
+    hsla(40, 30%, 100%, 0.9) 100%
+  );
+
+  --cover-bg: #e2dbcf;
+  --cover-fallback: linear-gradient(145deg, #ebe4d8 0%, #d9d0c0 100%);
+  --input-fill: rgba(26, 20, 12, 0.07);
+  --player-bar-bg: rgba(255, 252, 247, 0.92);
+  --player-top-line: rgba(26, 20, 12, 0.12);
+  --overlay-scrim: rgba(26, 20, 12, 0.35);
+  --shadow-elevated: 0 16px 48px rgba(40, 28, 12, 0.16);
+
+  --accent-ink: #fffaf3;
+  --accent-ink-soft: rgba(255, 250, 243, 0.78);
+  /* Light: ink primary buttons; soft amber selected chips (no mustard pills) */
+  --btn-solid-bg: #1c1915;
+  --btn-solid-bg-hover: #2c2722;
+  --btn-solid-ink: #fffaf3;
+  --chip-on-bg: rgba(184, 115, 30, 0.14);
+  --chip-on-ink: #9a5f14;
+  --chip-on-muted: rgba(154, 95, 20, 0.72);
+  --track-rail: rgba(26, 20, 12, 0.2);
+  --row-bg: rgba(255, 255, 255, 0.72);
+  --row-border: rgba(26, 20, 12, 0.08);
+  --row-border-hover: rgba(184, 115, 30, 0.32);
+  --row-border-active: rgba(184, 115, 30, 0.45);
+  --scrollbar-thumb: rgba(26, 20, 12, 0.22);
+  --scrollbar-thumb-hover: rgba(26, 20, 12, 0.36);
+  --app-glow-1: rgba(184, 115, 30, 0.07);
+  --app-glow-2: rgba(184, 115, 30, 0.04);
 }
 
 * {
@@ -89,6 +186,12 @@ body,
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;
+}
+
+html[data-theme="light"],
+html[data-theme="light"] body,
+html[data-theme="light"] #root {
+  color-scheme: light;
 }
 
 button,
@@ -164,6 +267,83 @@ button {
   display: none;
 }
 
+/* Light: replace faint glass pills with white chips + readable stroke */
+[data-theme="light"] .chart-tab,
+[data-theme="light"] .chip,
+[data-theme="light"] .ghost-btn,
+[data-theme="light"] .load-more-btn,
+[data-theme="light"] .history-chip,
+[data-theme="light"] .search-form {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow:
+    0 1px 2px rgba(26, 20, 12, 0.05),
+    inset 0 0 0 1px rgba(26, 20, 12, 0.14);
+}
+
+[data-theme="light"] .chart-tab::before,
+[data-theme="light"] .chip::before,
+[data-theme="light"] .ghost-btn::before,
+[data-theme="light"] .load-more-btn::before,
+[data-theme="light"] .history-chip::before,
+[data-theme="light"] .search-form::before {
+  display: none;
+}
+
+[data-theme="light"] .chart-tab,
+[data-theme="light"] .chip,
+[data-theme="light"] .ghost-btn,
+[data-theme="light"] .load-more-btn {
+  color: var(--text);
+}
+
+[data-theme="light"] .chart-tab span {
+  color: var(--text-dim);
+}
+
+[data-theme="light"] .chart-tab:hover,
+[data-theme="light"] .chip:hover,
+[data-theme="light"] .ghost-btn:hover,
+[data-theme="light"] .history-chip:hover,
+[data-theme="light"] .load-more-btn:hover {
+  background: #ffffff;
+  box-shadow:
+    0 2px 8px rgba(26, 20, 12, 0.08),
+    inset 0 0 0 1px rgba(26, 20, 12, 0.22);
+}
+
+[data-theme="light"] .chart-tab.on,
+[data-theme="light"] .chip.on {
+  background: var(--chip-on-bg);
+  color: var(--chip-on-ink);
+  box-shadow:
+    0 1px 2px rgba(184, 115, 30, 0.12),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+[data-theme="light"] .chart-tab.on span {
+  color: var(--chip-on-muted);
+}
+
+[data-theme="light"] .play-all-btn,
+[data-theme="light"] .search-form button,
+[data-theme="light"] .play-btn {
+  box-shadow: 0 1px 2px rgba(26, 20, 12, 0.14);
+}
+
+[data-theme="light"] .ghost-btn.danger {
+  background: rgba(196, 90, 78, 0.1);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(196, 90, 78, 0.28);
+}
+
+[data-theme="light"] .ghost-btn.danger:hover {
+  background: rgba(196, 90, 78, 0.16);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(196, 90, 78, 0.4);
+}
+
 /* ─── Shell ─────────────────────────────────────────── */
 
 .app {
@@ -172,8 +352,8 @@ button {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) var(--player-h);
   background:
-    radial-gradient(ellipse 80% 50% at 70% -10%, rgba(232, 168, 74, 0.08), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 10% 100%, rgba(90, 70, 40, 0.18), transparent 50%),
+    radial-gradient(ellipse 80% 50% at 70% -10%, var(--app-glow-1), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 10% 100%, var(--app-glow-2), transparent 50%),
     var(--bg);
 }
 
@@ -208,7 +388,7 @@ button {
 .brand-mark {
   flex-shrink: 0;
   border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 22%, transparent);
 }
 
 .brand-text {
@@ -517,12 +697,12 @@ button {
 }
 
 .panel-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 .panel-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .panel-head.row {
@@ -641,7 +821,7 @@ button {
 .settings-hotkey-row input {
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--input-fill);
   color: inherit;
   border-radius: 8px;
   padding: 7px 10px;
@@ -1037,7 +1217,7 @@ button {
 }
 
 .playlist-main-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
@@ -1093,7 +1273,7 @@ button {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--input-fill);
   color: var(--text);
   padding: 9px 14px;
   outline: none;
@@ -1227,7 +1407,7 @@ button {
 .playlist-picker-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--overlay-scrim);
   z-index: 40;
   display: grid;
   place-items: center;
@@ -1242,8 +1422,8 @@ button {
   overflow: auto;
   border: 0;
   border-radius: var(--radius-lg);
-  background: hsla(0, 0%, 100%, 0.06);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  background: var(--glass-fill);
+  box-shadow: var(--shadow-elevated);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   padding: 14px;
@@ -1366,8 +1546,8 @@ button {
   gap: 6px;
   border: 0;
   border-radius: 999px;
-  background: var(--accent);
-  color: #1a140c;
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-ink);
   padding: 8px 14px;
   font-size: 0.85rem;
   font-weight: 650;
@@ -1375,7 +1555,7 @@ button {
 }
 
 .play-all-btn:hover {
-  background: var(--accent-hover);
+  background: var(--btn-solid-bg-hover);
 }
 
 /* ─── Charts tabs ───────────────────────────────────── */
@@ -1412,15 +1592,15 @@ button {
 }
 
 .chart-tab.on {
-  color: #1a140c;
-  background: var(--accent);
+  color: var(--chip-on-ink);
+  background: var(--chip-on-bg);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   font-weight: 600;
 }
 
 .chart-tab.on span {
-  color: rgba(26, 20, 12, 0.65);
+  color: var(--chip-on-muted);
 }
 
 .load-more-wrap {
@@ -1482,8 +1662,8 @@ button {
   z-index: 2;
   border: 0;
   border-radius: var(--radius);
-  background: var(--accent);
-  color: #1a140c;
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-ink);
   padding: 10px 18px;
   font-weight: 650;
   letter-spacing: 0.02em;
@@ -1496,7 +1676,7 @@ button {
 
 .search-form button:hover:not(:disabled),
 .play-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--btn-solid-bg-hover);
 }
 
 .search-form button:disabled {
@@ -1622,8 +1802,8 @@ button {
 }
 
 .chip.on {
-  color: #1a140c;
-  background: var(--accent);
+  color: var(--chip-on-ink);
+  background: var(--chip-on-bg);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -1658,8 +1838,8 @@ button {
   align-items: center;
   padding: 10px 12px;
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.015);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: var(--row-bg);
+  border: 1px solid var(--row-border);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
@@ -1670,12 +1850,12 @@ button {
 
 .song-row:hover {
   background: var(--bg-row-hover);
-  border-color: rgba(232, 168, 74, 0.18);
+  border-color: var(--row-border-hover);
 }
 
 .song-row.active {
   background: var(--bg-row-active);
-  border-color: rgba(232, 168, 74, 0.32);
+  border-color: var(--row-border-active);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
@@ -1704,7 +1884,7 @@ button {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  background: #2a2520;
+  background: var(--cover-bg);
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -1720,8 +1900,7 @@ button {
 
 .cover-fallback,
 .player-cover.placeholder {
-  background:
-    linear-gradient(145deg, #3a3228 0%, #221e19 100%);
+  background: var(--cover-fallback);
   display: grid;
   place-items: center;
   color: var(--text-dim);
@@ -1893,7 +2072,7 @@ button {
   text-align: center;
   border-radius: var(--radius-lg);
   border: 1px dashed var(--line);
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--row-bg);
 }
 
 .error-banner {
@@ -1916,8 +2095,8 @@ button {
   align-items: center;
   gap: 16px;
   padding: 0 20px;
-  background: rgba(16, 13, 11, 0.72);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--player-bar-bg);
+  border-top: 1px solid var(--player-top-line);
   backdrop-filter: blur(22px) saturate(1.3);
   -webkit-backdrop-filter: blur(22px) saturate(1.3);
   z-index: 20;
@@ -1936,10 +2115,10 @@ button {
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
-  background: #2a2520;
+  background: var(--cover-bg);
   animation: cover-spin 18s linear infinite;
   animation-play-state: paused;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 1px var(--row-border);
 }
 
 .player-cover.is-playing {
@@ -1950,8 +2129,7 @@ button {
   display: grid;
   place-items: center;
   color: var(--text-dim);
-  background:
-    linear-gradient(145deg, #3a3228 0%, #221e19 100%);
+  background: var(--cover-fallback);
 }
 
 @keyframes cover-spin {
@@ -2055,7 +2233,7 @@ button {
 }
 
 .play-btn:not(:disabled):hover {
-  background: var(--accent-hover);
+  background: var(--btn-solid-bg-hover);
 }
 
 .seek {
@@ -2083,8 +2261,8 @@ button {
     to right,
     var(--accent) 0%,
     var(--accent) var(--seek-pct, 0%),
-    rgba(255, 255, 255, 0.14) var(--seek-pct, 0%),
-    rgba(255, 255, 255, 0.14) 100%
+    var(--track-rail) var(--seek-pct, 0%),
+    var(--track-rail) 100%
   );
 }
 
@@ -2093,16 +2271,16 @@ button {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--bg-elevated);
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 25%, transparent);
   cursor: pointer;
 }
 
 .seek input[type="range"]::-moz-range-track {
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--track-rail);
 }
 
 .seek input[type="range"]::-moz-range-progress {
@@ -2115,7 +2293,7 @@ button {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--bg-elevated);
   border: 2px solid var(--accent);
   cursor: pointer;
 }
@@ -2160,8 +2338,8 @@ button {
     to right,
     var(--accent) 0%,
     var(--accent) var(--vol-pct, 0%),
-    rgba(255, 255, 255, 0.14) var(--vol-pct, 0%),
-    rgba(255, 255, 255, 0.14) 100%
+    var(--track-rail) var(--vol-pct, 0%),
+    var(--track-rail) 100%
   );
 }
 
@@ -2170,7 +2348,8 @@ button {
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--bg-elevated);
+  border: 2px solid var(--accent);
   cursor: pointer;
 }
 
@@ -2186,8 +2365,8 @@ button {
   height: 14px;
   padding: 0 3px;
   border-radius: 7px;
-  background: var(--accent);
-  color: #1a140c;
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-ink);
   font-size: 0.58rem;
   font-weight: 700;
   font-family: var(--font-display);
@@ -2210,7 +2389,7 @@ button {
   border: 0;
   border-radius: var(--radius-lg);
   background: var(--glass-fill);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-elevated);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   z-index: 30;
@@ -2296,7 +2475,7 @@ button {
 }
 
 .queue-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
@@ -2315,7 +2494,7 @@ button {
   border: 0;
   border-radius: var(--radius-lg);
   background: var(--glass-fill);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-elevated);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   z-index: 30;

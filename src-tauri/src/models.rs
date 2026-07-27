@@ -8,6 +8,36 @@ pub enum Playability {
     Unavailable,
 }
 
+/// Preferred stream quality. Providers fall back when a tier is unavailable.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioQuality {
+    Standard,
+    #[default]
+    High,
+    Highest,
+}
+
+impl AudioQuality {
+    /// Netease `br` parameter (bps upper bound).
+    pub fn netease_br(self) -> u32 {
+        match self {
+            Self::Standard => 128_000,
+            Self::High => 320_000,
+            Self::Highest => 320_000,
+        }
+    }
+
+    /// Kuwo `br=` ladder, preferred first.
+    pub fn kuwo_brs(self) -> &'static [&'static str] {
+        match self {
+            Self::Standard => &["128kmp3"],
+            Self::High => &["192kmp3", "128kmp3", "320kmp3"],
+            Self::Highest => &["320kmp3", "192kmp3", "128kmp3"],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Track {

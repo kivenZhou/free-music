@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, PlayUrl, Playability, Track};
+use crate::models::{AudioQuality, Chart, PlayUrl, Playability, Track};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde_json::Value;
@@ -394,7 +394,11 @@ impl MusicProvider for KugouProvider {
             .collect())
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+    async fn play_url(
+        &self,
+        track_id: &str,
+        _quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
         let (urls, size) = self.fetch_play_candidates(track_id).await?;
         let remote = self.first_reachable(&urls).await?;
         let cached = self.cache_dir.join(format!("kugou_{track_id}.mp3"));
