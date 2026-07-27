@@ -49,6 +49,7 @@ import { checkForInstallableUpdate } from "./updater";
 import {
   readVoiceEnabled,
   VoiceAssistant,
+  VOICE_LISTEN_HINT,
   writeVoiceEnabled,
   type VoiceUiStatus,
 } from "./voice";
@@ -1361,9 +1362,9 @@ function App() {
               voiceEnabled
                 ? voiceUi.detail ||
                   (voiceUi.status === "listening"
-                    ? "正在聆听「小栈小栈」"
+                    ? VOICE_LISTEN_HINT
                     : voiceUi.status === "awake"
-                      ? "在呢"
+                      ? "请说指令…"
                       : voiceUi.status === "error"
                         ? "启动失败"
                         : "准备中…")
@@ -1397,7 +1398,7 @@ function App() {
                 ? "请说指令…"
                 : voiceUi.status === "error"
                   ? voiceUi.detail || "语音助手出错"
-                  : voiceUi.detail || "小栈聆听中"}
+                  : voiceUi.detail || VOICE_LISTEN_HINT}
           </span>
         </div>
       ) : null}

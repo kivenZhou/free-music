@@ -7,6 +7,8 @@ import {
 } from "./voiceIntentModel";
 
 export const VOICE_WAKE_WORD = "小栈小栈";
+/** Idle-listen chip text — keep in sync with macOS native `macos_speech.m`. */
+export const VOICE_LISTEN_HINT = "正在聆听「小栈」或「小栈小栈」";
 export const VOICE_ENABLED_KEY = "yinzhan-voice-enabled";
 export const VOICE_WAKE_REPLY = "在呢";
 
@@ -989,10 +991,7 @@ export class VoiceAssistant {
     this.webRec = rec;
     try {
       rec.start();
-      this.handlers.onStatus?.(
-        "listening",
-        `可以说「${VOICE_WAKE_WORD}」`,
-      );
+      this.handlers.onStatus?.("listening", VOICE_LISTEN_HINT);
       this.restoreFullVolume();
       await invoke("report_voice_web_status", {
         status: "listening",
@@ -1038,7 +1037,7 @@ export class VoiceAssistant {
       if (status === "listening" && !this.holdingMusic) this.restoreFullVolume();
       this.handlers.onStatus?.(
         status === "starting" ? "starting" : "listening",
-        detail || `可以说「${VOICE_WAKE_WORD}」`,
+        detail || VOICE_LISTEN_HINT,
       );
       return;
     }
@@ -1089,10 +1088,7 @@ export class VoiceAssistant {
       if (!this.running) return;
       if (Date.now() >= this.awakeUntil) {
         this.endMusicHold(true);
-        this.handlers.onStatus?.(
-          "listening",
-          `可以说「${VOICE_WAKE_WORD}」`,
-        );
+        this.handlers.onStatus?.("listening", VOICE_LISTEN_HINT);
       }
     }, ms + 50);
   }
@@ -1419,7 +1415,8 @@ export class VoiceAssistant {
           wokeOnly.kind === "wake_and_provider_play" ||
           wokeOnly.kind === "wake_and_switch_provider")
       ) {
-        this.handlers.onStatus?.("listening", "正在听…");
+        // Stay on awake so the pill shows「请说指令…」, not a bare「正在听…」.
+        this.handlers.onStatus?.("awake", "请说指令…");
         this.scheduleEndpoint(
           isFinal
             ? VoiceAssistant.ENDPOINT_FINAL_MS
@@ -1432,7 +1429,7 @@ export class VoiceAssistant {
 
     // Awake: buffer until ~1.6s silence, then understand the full sentence.
     this.scheduleCommandWindow(6500);
-    this.handlers.onStatus?.("awake", "正在听…");
+    this.handlers.onStatus?.("awake", "请说指令…");
     this.scheduleEndpoint(
       isFinal ? VoiceAssistant.ENDPOINT_FINAL_MS : VoiceAssistant.ENDPOINT_MS,
     );
