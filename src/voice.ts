@@ -100,6 +100,12 @@ export interface VoiceHandlers {
    * hold=false: end window; resume=true means continue playback if it was playing.
    */
   onMusicHold?: (hold: boolean, resume?: boolean) => void;
+  /**
+   * Soft-duck is only used during brief TTS echo windows if needed.
+   * Do NOT duck while idle-listening for wake — that made music stay quiet
+   * the whole time voice assistant was on.
+   */
+  onMusicDuck?: (factor: number) => void;
 }
 
 type SpeechRecCtor = new () => SpeechRecognitionLike;
@@ -124,17 +130,34 @@ interface SpeechRecognitionEventLike {
   }>;
 }
 
-/** Homophones / near-misses ASR often returns for 栈 */
-const ZHAN_VARIANTS = "栈站战占赞暂绽湛蘸";
+/** Homophones / near-misses ASR often returns for 栈 (esp. far-field). */
+const ZHAN_VARIANTS = "栈站战占赞暂绽湛蘸张章胀账杖展斩盏";
 
 function normalize(text: string): string {
   let s = text
     .toLowerCase()
-    .replace(/[\s,，。.!！?？、；;：:\-—_'"`~]/g, "");
+    .replace(/[\s,，。.!！?？、；;：:\-—_'"\`~··]/g, "");
+  // Whole-phrase ASR mangling common at a distance
+  s = s.replace(/xiao\s*zhan/gi, "小栈");
+  s = s.replace(
+    /校长|嚣张|小镇|小江|小姜|小疆|音栈|银栈|银站|阴站|心战|小展|小斩|小盏|消站|笑站|想站/g,
+    "小栈",
+  );
   // Map 小X → 小栈 for common variants
   const re = new RegExp(`小[${ZHAN_VARIANTS}]`, "g");
   s = s.replace(re, "小栈");
+  // Collapse stutter / ASR doubles: 小栈栈 → 小栈小栈-ish handled in hasWakeWord
+  s = s.replace(/栈{2,}/g, "栈栈");
   return s;
+}
+
+function wakeFillerOnly(rest: string): boolean {
+  if (!rest) return true;
+  // Tolerate short trailing ASR junk after the wake word.
+  if (rest.length <= 4) return true;
+  return /^(?:呀|啊|呢|嗯|哦|哎|欸|诶|呀啊|啊啊|嗯嗯|请|你|我说|那个|在吗|在不在|你好|嗨|喂)$/.test(
+    rest,
+  );
 }
 
 function hasWakeWord(norm: string): boolean {
@@ -142,7 +165,15 @@ function hasWakeWord(norm: string): boolean {
   const parts = norm.split("小栈");
   if (parts.length >= 3) return true;
   if (/小栈{2,}/.test(norm)) return true;
-  if (/小栈栈|栈小栈|小小栈/.test(norm)) return true;
+  if (/小栈栈|栈小栈|小小栈|栈栈/.test(norm)) return true;
+  // Single「小栈」is enough — even with short trailing noise.
+  if (countWakeTokens(norm) >= 1 && wakeFillerOnly(stripWakeWord(norm))) {
+    return true;
+  }
+  // Short utterance containing 小栈 anywhere (near-mic ASR often wraps fillers).
+  if (countWakeTokens(norm) >= 1 && norm.length <= 12) {
+    return true;
+  }
   return false;
 }
 
@@ -153,7 +184,11 @@ function countWakeTokens(norm: string): number {
 }
 
 function stripWakeWord(norm: string): string {
-  return norm.replace(/小栈小栈/g, "").replace(/小栈/g, "").trim();
+  return norm
+    .replace(/小栈小栈/g, "")
+    .replace(/小栈/g, "")
+    .replace(/栈栈/g, "")
+    .trim();
 }
 
 /** Longest-first aliases → provider id (normalized text). */
@@ -344,14 +379,30 @@ function matchAction(norm: string): VoiceAction | null {
   ) {
     return "whats_playing";
   }
+  // Local favorites → queue, never online search for「收藏里面的音乐」.
   if (
-    /播放(?:我的)?收藏|来点收藏|听(?:我的)?收藏|打开收藏播放|播放收藏(?:夹|列表|的歌)?/.test(
+    !/取消收藏|移除收藏|不收藏|加入收藏|添加到收藏|收藏这首|收藏当前|收藏一下|帮我收藏|喜欢这首/.test(
       norm,
-    )
+    ) &&
+    (/(?:播放|放|听|来点|打开)(?:一下)?(?:我的)?收藏/.test(norm) ||
+      /从收藏(?:夹|列表)?(?:里|里面)?(?:播放|放|听)/.test(norm) ||
+      /把收藏(?:夹|列表)?(?:里|里面)?的?(?:歌|音乐|歌曲)?(?:都)?(?:拿出来)?(?:播放|放)/.test(
+        norm,
+      ) ||
+      /收藏(?:夹|列表)?(?:里|里面)的(?:歌|音乐|歌曲|曲子)?/.test(norm) ||
+      /^(?:播放|放)(?:我的)?收藏(?:夹|列表)?$/.test(norm))
   ) {
     return "play_favorites";
   }
   return null;
+}
+
+/** Query that only names the local favorites library (not a song title). */
+function isFavoritesLibraryQuery(q: string): boolean {
+  if (!q) return false;
+  return /^(?:我的)?收藏(?:夹|列表)?(?:里|里面)?(?:的)?(?:歌|音乐|歌曲|曲子)?$/.test(
+    q,
+  );
 }
 
 const THEME_RE =
@@ -455,18 +506,25 @@ function extractSearchPlay(norm: string): string | null {
       q = raw.replace(/(?:谢谢你|谢谢)$/g, "").trim();
     }
     if (q.length < 1) continue;
-    if (matchAction(q)) continue;
+    if (isFavoritesLibraryQuery(q) || isFavoritesLibraryQuery(raw)) continue;
+    if (matchAction(q) || matchAction(norm)) continue;
     if (/^(?:下一首|上一首|暂停|继续|静音)$/.test(q)) continue;
     return q;
   }
   return null;
 }
 
+function detectedWake(norm: string): boolean {
+  if (hasWakeWord(norm)) return true;
+  // 「小栈播放…」— single wake token as prefix (far-field often drops the repeat)
+  return countWakeTokens(norm) >= 1 && /^小栈/.test(norm);
+}
+
 export function parseVoiceText(text: string, awake: boolean): VoiceIntent | null {
   const norm = normalize(text);
   if (!norm) return null;
 
-  const woke = hasWakeWord(norm);
+  const woke = detectedWake(norm);
   const rest = woke ? stripWakeWord(norm) : norm;
 
   // Empty after wake word only
@@ -531,6 +589,14 @@ export function parseVoiceText(text: string, awake: boolean): VoiceIntent | null
     return null;
   }
 
+  // Commands like「播放收藏里面的音乐」must beat generic search/theme play.
+  const action = matchAction(rest);
+  if (action) {
+    if (woke) return { kind: "wake_and_command", action };
+    if (awake) return { kind: "command", action };
+    return null;
+  }
+
   // IMPORTANT: 「播放七里香」must be search, not bare「播放」.
   const query = extractSearchPlay(rest);
   if (query) {
@@ -541,13 +607,6 @@ export function parseVoiceText(text: string, awake: boolean): VoiceIntent | null
     }
     if (woke) return { kind: "wake_and_search_play", query };
     if (awake) return { kind: "search_play", query };
-    return null;
-  }
-
-  const action = matchAction(rest);
-  if (action) {
-    if (woke) return { kind: "wake_and_command", action };
-    if (awake) return { kind: "command", action };
     return null;
   }
 
@@ -563,6 +622,13 @@ function modelLabelToIntent(
 ): VoiceIntent | null {
   if (!woke && !awake) return null;
   if (label === "none") return null;
+
+  // Rules may have missed after ASR noise; still prefer local favorites.
+  const favAction = matchAction(rest);
+  if (favAction === "play_favorites" || label === "play_favorites") {
+    if (woke) return { kind: "wake_and_command", action: "play_favorites" };
+    return { kind: "command", action: "play_favorites" };
+  }
 
   if (label === "provider_play") {
     const scoped = parseProviderScoped(rest);
@@ -680,7 +746,7 @@ export function resolveVoiceIntent(
 
   const norm = normalize(text);
   if (!norm) return null;
-  const woke = hasWakeWord(norm);
+  const woke = detectedWake(norm);
   const rest = woke ? stripWakeWord(norm) : norm;
   if (!rest) {
     return woke || rules?.kind === "wake" ? { kind: "wake" } : null;
@@ -853,6 +919,7 @@ export class VoiceAssistant {
     }
     this.utteranceBuf = "";
     this.endMusicHold(false);
+    this.restoreFullVolume();
     this.stopWeb();
     if (this.unlistenTranscript) {
       this.unlistenTranscript();
@@ -924,8 +991,9 @@ export class VoiceAssistant {
       rec.start();
       this.handlers.onStatus?.(
         "listening",
-        `可以说「${VOICE_WAKE_WORD}」（播放中请靠近麦克风、说清楚）`,
+        `可以说「${VOICE_WAKE_WORD}」`,
       );
+      this.restoreFullVolume();
       await invoke("report_voice_web_status", {
         status: "listening",
         detail: VOICE_WAKE_WORD,
@@ -966,6 +1034,8 @@ export class VoiceAssistant {
     }
     if (status === "listening" || status === "starting") {
       if (status === "listening" && this.isAwake()) return;
+      // Idle listen must not duck music — that made volume stay tiny while voice was on.
+      if (status === "listening" && !this.holdingMusic) this.restoreFullVolume();
       this.handlers.onStatus?.(
         status === "starting" ? "starting" : "listening",
         detail || `可以说「${VOICE_WAKE_WORD}」`,
@@ -978,12 +1048,14 @@ export class VoiceAssistant {
     }
     if (status === "error") {
       this.endMusicHold(false);
+      this.restoreFullVolume();
       this.handlers.onStatus?.("error", detail || "语音助手出错");
       return;
     }
     if (status === "stopped") {
       this.running = false;
       this.endMusicHold(false);
+      this.restoreFullVolume();
       this.handlers.onStatus?.("stopped", detail);
     }
   }
@@ -992,6 +1064,7 @@ export class VoiceAssistant {
     if (this.holdingMusic) return;
     this.holdingMusic = true;
     this.suppressResume = false;
+    this.handlers.onMusicDuck?.(1);
     this.handlers.onMusicHold?.(true);
   }
 
@@ -1001,6 +1074,12 @@ export class VoiceAssistant {
     const shouldResume = resume && !this.suppressResume;
     this.suppressResume = false;
     this.handlers.onMusicHold?.(false, shouldResume);
+    this.restoreFullVolume();
+  }
+
+  /** Always restore full playback level when not in an active hold. */
+  private restoreFullVolume() {
+    this.handlers.onMusicDuck?.(1);
   }
 
   private scheduleCommandWindow(ms: number) {
@@ -1020,12 +1099,12 @@ export class VoiceAssistant {
 
   private triggerWake(detail = VOICE_WAKE_REPLY) {
     const now = Date.now();
-    if (now - this.lastWakeAt < 1200) return;
+    if (now - this.lastWakeAt < 800) return;
     this.lastWakeAt = now;
     this.wakeHits = 0;
     this.beginMusicHold();
-    // Ignore ASR while TTS plays (native also pauses mic).
-    this.ignoreUntil = now + 5000;
+    // Short ignore for TTS echo; speakReply resets this when done.
+    this.ignoreUntil = now + 1800;
     this.awakeUntil = now + 12000;
     this.handlers.onStatus?.("speaking", detail);
     void this.speakReply(VOICE_WAKE_REPLY);
@@ -1047,13 +1126,14 @@ export class VoiceAssistant {
 
   private async speakAck(text: string) {
     this.handlers.onStatus?.("speaking", text);
-    this.ignoreUntil = Date.now() + 5000;
+    // Block only while TTS may echo — don't leave a long deaf window after.
+    this.ignoreUntil = Date.now() + 12_000;
     try {
       await invoke("voice_speak", { text });
     } catch {
       // ignore
     } finally {
-      this.ignoreUntil = Date.now() + 500;
+      this.ignoreUntil = Date.now() + 700;
     }
   }
 
@@ -1076,8 +1156,6 @@ export class VoiceAssistant {
       return;
     }
 
-    await this.speakAck(`收到，${actionLabel(action)}`);
-
     if (action === "pause" || action === "mute") {
       this.suppressResume = true;
     }
@@ -1085,6 +1163,17 @@ export class VoiceAssistant {
       this.suppressResume = true;
     }
 
+    // Skip tracks before TTS so「上一首 / 下一首」isn't delayed by speech.
+    if (action === "next" || action === "prev") {
+      applyAction(action, this.handlers);
+      // New track may have started playing; pause again so the ack is clear.
+      this.handlers.onPause();
+      await this.speakAck(`收到，${actionLabel(action)}`);
+      this.finishSession(`已执行：${actionLabel(action)}`, true);
+      return;
+    }
+
+    await this.speakAck(`收到，${actionLabel(action)}`);
     applyAction(action, this.handlers);
     const resume =
       action !== "pause" && action !== "mute" && action !== "play_favorites";
@@ -1275,7 +1364,7 @@ export class VoiceAssistant {
 
     const echoNorm = normalize(trimmed);
     if (
-      !hasWakeWord(echoNorm) &&
+      !detectedWake(echoNorm) &&
       (/^(?:在呢|我在你说|我在|你说|收到|好的|已暂停|音量已调大|音量已调小|搜索失败|请说指令|没听清)/.test(
         echoNorm,
       ) ||
@@ -1294,26 +1383,32 @@ export class VoiceAssistant {
 
     if (!awake) {
       const wokeOnly = parseVoiceText(trimmed, false);
-      if (wokeOnly?.kind === "wake") {
+      const tokens = countWakeTokens(norm);
+      const rest = stripWakeWord(norm);
+      const pureWake =
+        wokeOnly?.kind === "wake" ||
+        (tokens >= 1 && (wakeFillerOnly(rest) || norm.length <= 12));
+
+      // Pure wake (incl. short partial ASR) — fire immediately.
+      if (pureWake && (!wokeOnly || wokeOnly.kind === "wake")) {
         this.clearEndpointTimer();
         this.utteranceBuf = "";
         this.triggerWake();
         return;
       }
-      if (!wokeOnly) {
+
+      if (!wokeOnly && tokens > 0) {
         if (now > this.wakeHitResetAt) this.wakeHits = 0;
-        const tokens = countWakeTokens(norm);
-        if (tokens > 0) {
-          this.wakeHits += tokens;
-          this.wakeHitResetAt = now + 2200;
-          if (this.wakeHits >= 2 && !stripWakeWord(norm)) {
-            this.clearEndpointTimer();
-            this.utteranceBuf = "";
-            this.triggerWake();
-            return;
-          }
+        this.wakeHits += tokens;
+        this.wakeHitResetAt = now + 5000;
+        if (this.wakeHits >= 1 && (wakeFillerOnly(rest) || norm.length <= 12)) {
+          this.clearEndpointTimer();
+          this.utteranceBuf = "";
+          this.triggerWake();
+          return;
         }
       }
+
       // 「小栈小栈播放xxx」— wait until speech ends so we don't cut off the song name.
       if (
         wokeOnly &&

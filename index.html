@@ -14,7 +14,16 @@
         background: #141210;
         color-scheme: dark;
       }
+      html.desktop-lyrics-boot,
+      html.desktop-lyrics-boot body {
+        background: transparent !important;
+      }
     </style>
+    <script>
+      if (new URLSearchParams(location.search).get("view") === "desktop-lyrics") {
+        document.documentElement.classList.add("desktop-lyrics-boot");
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

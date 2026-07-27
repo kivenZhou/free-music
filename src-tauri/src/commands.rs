@@ -1,7 +1,8 @@
 use crate::cache::{self, CacheStats};
 use crate::db::Database;
 use crate::models::{
-    Chart, FavoriteItem, PlayUrl, Playlist, PlaylistTrackItem, SearchHistoryItem, Track,
+    Chart, FavoriteItem, PlayHistoryItem, PlayUrl, Playlist, PlaylistTrackItem, SearchHistoryItem,
+    Track,
 };
 use crate::providers::ProviderRegistry;
 use serde::Serialize;
@@ -313,4 +314,25 @@ pub fn remove_from_playlist(
         .db
         .remove_from_playlist(playlist_id, &provider, &track_id)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_play_history(state: State<'_, Arc<AppState>>, track: Track) -> Result<(), String> {
+    state.db.add_play_history(&track).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_play_history(
+    state: State<'_, Arc<AppState>>,
+    limit: Option<i64>,
+) -> Result<Vec<PlayHistoryItem>, String> {
+    state
+        .db
+        .list_play_history(limit.unwrap_or(100))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_play_history(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.db.clear_play_history().map_err(|e| e.to_string())
 }

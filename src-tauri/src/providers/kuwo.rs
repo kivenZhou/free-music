@@ -10,18 +10,22 @@ const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/53
 /// Kuwo bang charts are almost all "client-only" stubs now.
 /// Use keyword searches that still return free full streams.
 const CHARTS: &[(&str, &str, &str, &str)] = &[
-    ("流行", "热歌精选", "cn", "免费可播热门（搜索精选）"),
-    ("新歌", "新歌精选", "cn", "免费可播新歌"),
+    ("华语流行", "热歌精选", "cn", "免费可播热门（搜索精选）"),
+    ("华语新歌", "新歌精选", "cn", "免费可播新歌"),
     ("粤语经典", "粤语金曲", "hk", "免费可播粤语"),
     ("粤语歌", "粤语流行", "hk", "粤语流行向"),
     ("80年代经典", "80年代", "cn", "八十年代怀旧"),
     ("90年代经典", "90年代", "cn", "九十年代怀旧"),
     ("怀旧金曲", "怀旧金曲", "cn", "经典怀旧精选"),
-    ("韩语", "韩国流行", "kr", "免费可播韩流"),
-    ("日语", "日本流行", "jp", "免费可播日流"),
+    ("韩语流行", "韩国流行", "kr", "免费可播韩流"),
+    ("日语流行", "日本流行", "jp", "免费可播日流"),
     ("轻音乐", "轻音乐", "cn", "免费可播轻音乐"),
-    ("抖音", "抖音热歌", "cn", "免费可播抖音向"),
 ];
+
+fn is_junk_title(title: &str) -> bool {
+    const NEEDLES: &[&str] = &["伴奏", "片段", "试听", "铃声", "消音", "DJ版", "抖音热搜"];
+    NEEDLES.iter().any(|n| title.contains(n))
+}
 
 /// Known stub clip sizes for "仅在酷我客户端播放".
 const STUB_SIZES: &[u64] = &[181521, 185336, 181_000, 186_000];
@@ -100,8 +104,8 @@ impl KuwoProvider {
                 .and_then(|v| v.as_str())
                 .unwrap_or("未知歌曲"),
         );
-        // Skip obvious clip / preview titles
-        if title.contains("片段") || title.contains("试听") {
+        // Skip obvious clip / preview / karaoke titles
+        if is_junk_title(&title) {
             return None;
         }
         let artist = decode_html(
@@ -372,9 +376,9 @@ impl MusicProvider for KuwoProvider {
     ) -> Result<Vec<Track>, ProviderError> {
         // chart_id is a keyword for free searchable music
         // kuwo `pn` is 0-based page index with `rn` page size.
-        let page_size = limit.max(1);
-        let page = offset / page_size;
-        let skip = (offset % page_size) as usize;
+        let page_size = (limit.saturating_mul(2)).clamp(limit, 40);
+        let page = offset / limit.max(1);
+        let skip = (offset % limit.max(1)) as usize;
         let candidates = self.search_raw(chart_id, page_size, page).await?;
         Ok(candidates
             .into_iter()

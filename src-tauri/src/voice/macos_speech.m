@@ -1,6 +1,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
 #import <Speech/Speech.h>
+#import <math.h>
+#import <stdatomic.h>
 
 typedef void (*VoiceTranscriptCb)(const char *text, int is_final, void *userdata);
 typedef void (*VoiceStatusCb)(const char *status, const char *detail, void *userdata);
@@ -16,7 +18,15 @@ static SFSpeechRecognitionTask *g_task = nil;
 static BOOL g_running = NO;
 static BOOL g_restarting = NO;
 static BOOL g_speaking = NO;
+static BOOL g_tap_installed = NO;
+static BOOL g_restart_pending = NO;
 static NSTimer *g_segment_timer = nil;
+static NSTimer *g_watchdog_timer = nil;
+static NSTimeInterval g_last_session_ok_at = 0;
+/// EMA of input RMS for smooth far-field AGC (laptop mics are near-field).
+static float g_agc_rms = 0.02f;
+/// Tap callback must stop feeding before we tear down the Speech request.
+static atomic_bool g_feed_audio = false;
 
 static AVSpeechSynthesizer *g_synth = nil;
 
@@ -52,45 +62,6 @@ static void emit_transcript(NSString *text, BOOL isFinal) {
   g_transcript_cb(text.UTF8String, isFinal ? 1 : 0, g_userdata);
 }
 
-static void stop_engine_locked(void) {
-  if (g_segment_timer) {
-    [g_segment_timer invalidate];
-    g_segment_timer = nil;
-  }
-  if (g_task) {
-    [g_task cancel];
-    g_task = nil;
-  }
-  if (g_request) {
-    [g_request endAudio];
-    g_request = nil;
-  }
-  if (g_engine) {
-    @try {
-      [g_engine.inputNode removeTapOnBus:0];
-    } @catch (__unused NSException *e) {
-    }
-    if (g_engine.isRunning) {
-      [g_engine stop];
-    }
-  }
-}
-
-static void start_recognition_session(void);
-
-static void schedule_restart(void) {
-  if (!g_running || g_restarting || g_speaking) return;
-  g_restarting = YES;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
-                 dispatch_get_main_queue(), ^{
-                   g_restarting = NO;
-                   if (g_running && !g_speaking) {
-                     start_recognition_session();
-                   }
-                 });
-}
-
-/// Soft AGC: lift quiet speech without hard clipping that destroys ASR.
 static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   if (!buffer.floatChannelData || buffer.frameLength == 0) return;
   const AVAudioFrameCount frames = buffer.frameLength;
@@ -110,21 +81,30 @@ static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   }
   if (n == 0) return;
   float rms = (float)sqrt(sumSq / (double)n);
-  if (rms < 0.003f) return; // silence / noise floor — don't boost hiss
+  if (rms < 0.00015f) return;
 
-  const float target = 0.11f;
-  float gain = target / rms;
+  const float attack = 0.55f;
+  const float release = 0.05f;
+  if (rms > g_agc_rms) {
+    g_agc_rms += (rms - g_agc_rms) * attack;
+  } else {
+    g_agc_rms += (rms - g_agc_rms) * release;
+  }
+
+  float level = g_agc_rms;
+  if (level < 0.0005f) level = 0.0005f;
+  const float target = 0.34f;
+  float gain = target / level;
   if (gain < 1.0f) gain = 1.0f;
-  if (gain > 1.75f) gain = 1.75f;
+  if (gain > 28.0f) gain = 28.0f;
 
   for (UInt32 ch = 0; ch < chCount; ch++) {
     float *samples = buffer.floatChannelData[ch];
     if (!samples) continue;
     for (AVAudioFrameCount i = 0; i < frames; i++) {
       float v = samples[i] * gain;
-      // Soft knee limiter
-      if (v > 0.95f) v = 0.95f + (v - 0.95f) * 0.15f;
-      if (v < -0.95f) v = -0.95f + (v + 0.95f) * 0.15f;
+      if (v > 0.90f) v = 0.90f + (v - 0.90f) * 0.10f;
+      if (v < -0.90f) v = -0.90f + (v + 0.90f) * 0.10f;
       if (v > 1.f) v = 1.f;
       if (v < -1.f) v = -1.f;
       samples[i] = v;
@@ -132,88 +112,316 @@ static void apply_soft_agc(AVAudioPCMBuffer *buffer) {
   }
 }
 
-static void start_recognition_session(void) {
-  if (!g_running || !g_recognizer || !g_engine || g_speaking) return;
+/// Stop Speech task/request only. Keep AVAudioEngine alive so we don't race
+/// WebKit HTMLAudio on CoreAudio's IO thread (was EXC_BAD_ACCESS / SIGSEGV).
+static void pause_recognition_only(void) {
+  atomic_store(&g_feed_audio, false);
 
-  stop_engine_locked();
+  if (g_segment_timer) {
+    [g_segment_timer invalidate];
+    g_segment_timer = nil;
+  }
 
-  if (![g_recognizer isAvailable]) {
-    emit_status("error", @"系统语音识别当前不可用，请检查网络或「系统设置 → 键盘 → 听写」。");
+  SFSpeechRecognitionTask *task = g_task;
+  g_task = nil;
+  SFSpeechAudioBufferRecognitionRequest *request = g_request;
+  g_request = nil;
+
+  if (task) {
+    [task cancel];
+  }
+  if (request) {
+    @try {
+      [request endAudio];
+    } @catch (__unused NSException *e) {
+    }
+  }
+}
+
+static void uninstall_engine_fully(void) {
+  pause_recognition_only();
+  if (!g_engine) {
+    g_tap_installed = NO;
+    return;
+  }
+  if (g_tap_installed) {
+    @try {
+      [g_engine.inputNode removeTapOnBus:0];
+    } @catch (__unused NSException *e) {
+    }
+    g_tap_installed = NO;
+  }
+  if (g_engine.isRunning) {
+    [g_engine stop];
+  }
+  @try {
+    [g_engine reset];
+  } @catch (__unused NSException *e) {
+  }
+}
+
+static void release_engine_deferred(void) {
+  uninstall_engine_fully();
+  AVAudioEngine *engine = g_engine;
+  g_engine = nil;
+  if (!engine) return;
+  // Hold the last retain across a tick so HAL IOThread can unwind.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), ^{
+                   (void)engine;
+                 });
+}
+
+static void start_recognition_session(void);
+static void arm_watchdog(void);
+
+/// Minimum gap between recognition restarts — prevents thrashing that makes wake impossible.
+static const NSTimeInterval kMinRestartGap = 3.5;
+static NSTimeInterval g_last_restart_at = 0;
+
+static void schedule_restart(void) {
+  if (!g_running) return;
+  if (g_speaking) {
+    g_restart_pending = YES;
+    return;
+  }
+  if (g_restarting) {
+    g_restart_pending = YES;
     return;
   }
 
+  NSTimeInterval now = [NSDate date].timeIntervalSince1970;
+  NSTimeInterval wait = 0.20;
+  if (g_last_restart_at > 0) {
+    NSTimeInterval since = now - g_last_restart_at;
+    if (since < kMinRestartGap) {
+      wait = kMinRestartGap - since;
+    }
+  }
+
+  g_restarting = YES;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), ^{
+                   g_restarting = NO;
+                   if (!g_running) return;
+                   if (g_speaking) {
+                     g_restart_pending = YES;
+                     return;
+                   }
+                   // Consume pending flags from the wait window — do NOT chain another
+                   // restart after a successful start (that was killing fresh sessions).
+                   g_restart_pending = NO;
+                   g_last_restart_at = [NSDate date].timeIntervalSince1970;
+                   start_recognition_session();
+                 });
+}
+
+static void note_session_alive(void) {
+  g_last_session_ok_at = [NSDate date].timeIntervalSince1970;
+}
+
+static void arm_watchdog(void) {
+  if (g_watchdog_timer) {
+    [g_watchdog_timer invalidate];
+    g_watchdog_timer = nil;
+  }
+  if (!g_running) return;
+  g_watchdog_timer =
+      [NSTimer scheduledTimerWithTimeInterval:8.0
+                                      repeats:YES
+                                        block:^(__unused NSTimer *timer) {
+                                          if (!g_running || g_speaking || g_restarting) return;
+                                          // Only recover truly dead sessions — not brief recycle gaps.
+                                          BOOL hasSession = g_task && g_request &&
+                                                            atomic_load(&g_feed_audio);
+                                          BOOL engineOk = g_engine && g_engine.isRunning;
+                                          NSTimeInterval now = [NSDate date].timeIntervalSince1970;
+                                          BOOL stale = g_last_session_ok_at > 0 &&
+                                                       (now - g_last_session_ok_at > 40.0);
+                                          if ((!hasSession && !g_restarting) || !engineOk || stale) {
+                                            emit_status("listening", @"正在恢复聆听…");
+                                            schedule_restart();
+                                          }
+                                        }];
+}
+
+static BOOL text_looks_like_wake(NSString *text) {
+  if (text.length == 0) return NO;
+  NSString *s = [[text lowercaseString]
+      stringByReplacingOccurrencesOfString:@" "
+                                 withString:@""];
+  NSArray<NSString *> *needles = @[
+    @"小栈", @"小站", @"小战", @"小占", @"小赞", @"小张", @"小章", @"校长",
+    @"嚣张", @"小镇", @"小江", @"音栈", @"银站", @"小展", @"小斩", @"xiaozhan"
+  ];
+  for (NSString *n in needles) {
+    if ([s containsString:n]) return YES;
+  }
+  return NO;
+}
+
+static BOOL ensure_engine_running(void) {
+  if (!g_engine) {
+    g_engine = [[AVAudioEngine alloc] init];
+    g_tap_installed = NO;
+  }
+
+  AVAudioFormat *format = [g_engine.inputNode outputFormatForBus:0];
+  if (format.sampleRate <= 0 || format.channelCount <= 0) {
+    // Device route can go invalid after long playback — rebuild once.
+    uninstall_engine_fully();
+    g_engine = [[AVAudioEngine alloc] init];
+    g_tap_installed = NO;
+    format = [g_engine.inputNode outputFormatForBus:0];
+    if (format.sampleRate <= 0 || format.channelCount <= 0) {
+      emit_status("error", @"无法读取麦克风音频格式");
+      return NO;
+    }
+  }
+
+  if (!g_tap_installed) {
+    [g_engine.inputNode installTapOnBus:0
+                             bufferSize:2048
+                                 format:format
+                                  block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+                                    (void)when;
+                                    if (!atomic_load(&g_feed_audio) || g_speaking) return;
+                                    SFSpeechAudioBufferRecognitionRequest *req = g_request;
+                                    if (!req) return;
+                                    apply_soft_agc(buffer);
+                                    [req appendAudioPCMBuffer:buffer];
+                                  }];
+    g_tap_installed = YES;
+  }
+
+  if (!g_engine.isRunning) {
+    NSError *startErr = nil;
+    [g_engine prepare];
+    if (![g_engine startAndReturnError:&startErr]) {
+      // Last resort: recreate engine + tap.
+      uninstall_engine_fully();
+      g_engine = [[AVAudioEngine alloc] init];
+      g_tap_installed = NO;
+      format = [g_engine.inputNode outputFormatForBus:0];
+      if (format.sampleRate <= 0 || format.channelCount <= 0) {
+        emit_status("error",
+                    startErr.localizedDescription ?: @"无法启动麦克风采集");
+        return NO;
+      }
+      [g_engine.inputNode installTapOnBus:0
+                               bufferSize:2048
+                                   format:format
+                                    block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+                                      (void)when;
+                                      if (!atomic_load(&g_feed_audio) || g_speaking) return;
+                                      SFSpeechAudioBufferRecognitionRequest *req = g_request;
+                                      if (!req) return;
+                                      apply_soft_agc(buffer);
+                                      [req appendAudioPCMBuffer:buffer];
+                                    }];
+      g_tap_installed = YES;
+      startErr = nil;
+      [g_engine prepare];
+      if (![g_engine startAndReturnError:&startErr]) {
+        emit_status("error",
+                    startErr.localizedDescription ?: @"无法启动麦克风采集");
+        return NO;
+      }
+    }
+  }
+  return YES;
+}
+
+static void start_recognition_session(void) {
+  if (!g_running || !g_recognizer || g_speaking) return;
+
+  // Recycle Speech request/task only — never stop AVAudioEngine here.
+  pause_recognition_only();
+
+  if (![g_recognizer isAvailable]) {
+    emit_status("error", @"系统语音识别当前不可用，请检查网络或「系统设置 → 键盘 → 听写」。");
+    schedule_restart();
+    return;
+  }
+
+  if (!ensure_engine_running()) {
+    // Stay recoverable — watchdog / pending restart will try again.
+    g_restart_pending = YES;
+    schedule_restart();
+    return;
+  }
+
+  g_agc_rms = 0.0025f;
   g_request = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
   g_request.shouldReportPartialResults = YES;
-  g_request.taskHint = SFSpeechRecognitionTaskHintConfirmation;
+  g_request.taskHint = SFSpeechRecognitionTaskHintDictation;
   g_request.contextualStrings = @[
-    @"小栈小栈", @"小栈", @"继续", @"继续播放", @"暂停", @"下一首", @"上一首",
-    @"换一首", @"帮我播放", @"我想听", @"播放", @"静音", @"大声点", @"小声点",
-    @"切歌", @"停止", @"来一首"
+    @"小栈小栈", @"小栈", @"小站小站", @"小站", @"小张小张", @"小张",
+    @"校长校长", @"校长", @"嚣张", @"音栈", @"银站",
+    @"继续", @"继续播放", @"暂停", @"下一首", @"上一首", @"换一首",
+    @"帮我播放", @"我想听", @"播放", @"静音", @"大声点", @"小声点",
+    @"切歌", @"停止", @"来一首", @"在呢", @"在吗"
   ];
   if (@available(macOS 13.0, *)) {
     g_request.requiresOnDeviceRecognition = NO;
   }
 
-  AVAudioFormat *format = [g_engine.inputNode outputFormatForBus:0];
-  if (format.sampleRate <= 0 || format.channelCount <= 0) {
-    emit_status("error", @"无法读取麦克风音频格式");
-    return;
-  }
-
-  [g_engine.inputNode installTapOnBus:0
-                           bufferSize:1024
-                               format:format
-                                block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
-                                  (void)when;
-                                  if (g_speaking) return;
-                                  SFSpeechAudioBufferRecognitionRequest *req = g_request;
-                                  if (!req) return;
-                                  apply_soft_agc(buffer);
-                                  [req appendAudioPCMBuffer:buffer];
-                                }];
-
-  NSError *startErr = nil;
-  [g_engine prepare];
-  if (![g_engine startAndReturnError:&startErr]) {
-    emit_status("error",
-                startErr.localizedDescription ?: @"无法启动麦克风采集");
-    return;
-  }
+  atomic_store(&g_feed_audio, true);
+  note_session_alive();
 
   g_task = [g_recognizer
       recognitionTaskWithRequest:g_request
                    resultHandler:^(SFSpeechRecognitionResult *result, NSError *error) {
                      if (g_speaking) return;
                      if (result) {
-                       emit_transcript(result.bestTranscription.formattedString,
-                                       result.isFinal);
+                       note_session_alive();
+                       NSString *best =
+                           result.bestTranscription.formattedString ?: @"";
+                       if (!text_looks_like_wake(best)) {
+                         for (SFTranscription *alt in result.transcriptions) {
+                           NSString *t = alt.formattedString ?: @"";
+                           if (text_looks_like_wake(t)) {
+                             best = t;
+                             break;
+                           }
+                         }
+                       }
+                       // Keep feeding partials — do NOT restart on isFinal.
+                       // Restarting every final was chopping wake phrases mid-utterance.
+                       emit_transcript(best, result.isFinal);
                      }
                      if (error) {
+                       NSInteger code = error.code;
+                       // Cancel / no-speech from our own recycle — ignore.
+                       if (code == 203 || code == 216 || code == 301 || code == 1 ||
+                           code == 1110) {
+                         return;
+                       }
+                       NSString *desc =
+                           (error.localizedDescription ?: @"").lowercaseString;
+                       if ([desc containsString:@"cancel"] ||
+                           [desc containsString:@"no speech"]) {
+                         return;
+                       }
                        if (g_running && !g_speaking) {
                          schedule_restart();
                        }
-                       return;
-                     }
-                     if (result.isFinal && g_running && !g_speaking) {
-                       schedule_restart();
                      }
                    }];
 
+  // Speech cloud sessions eventually expire; recycle gently (~50s).
   g_segment_timer =
-      [NSTimer scheduledTimerWithTimeInterval:4.0
+      [NSTimer scheduledTimerWithTimeInterval:50.0
                                       repeats:NO
                                         block:^(__unused NSTimer *timer) {
                                           if (!g_running || g_speaking) return;
-                                          if (g_request) {
-                                            [g_request endAudio];
-                                          }
                                           schedule_restart();
                                         }];
 
-  emit_status("listening", @"正在聆听「小栈小栈」");
+  emit_status("listening", @"正在聆听「小栈」或「小栈小栈」");
+  arm_watchdog();
 }
 
-/// Prefer natural Mandarin: Yu-shu / Siri female, Premium > Enhanced > Default.
 static int score_zh_voice(AVSpeechSynthesisVoice *v) {
   if (!v) return -1;
   NSString *lang = v.language ?: @"";
@@ -221,7 +429,7 @@ static int score_zh_voice(AVSpeechSynthesisVoice *v) {
   if ([lang hasPrefix:@"zh-CN"] || [lang hasPrefix:@"zh-Hans"]) {
     score += 80;
   } else if ([lang hasPrefix:@"zh"]) {
-    score += 20; // zh-TW / zh-HK — usable fallback only
+    score += 20;
   } else {
     return -1;
   }
@@ -237,7 +445,6 @@ static int score_zh_voice(AVSpeechSynthesisVoice *v) {
     if (v.quality >= AVSpeechSynthesisVoiceQualityEnhanced) score += 70;
   }
 
-  // Siri 女声「语舒」通常比旧版 Ting-Ting compact 更自然
   if ([ident containsString:@"siri_female_zh-cn"] ||
       [name containsString:@"yu-shu"] || [name containsString:@"yushu"] ||
       [name containsString:@"语舒"]) {
@@ -252,7 +459,6 @@ static int score_zh_voice(AVSpeechSynthesisVoice *v) {
     if (v.gender == AVSpeechSynthesisVoiceGenderMale) score -= 10;
   }
 
-  // Compact / novelty voices sound robotic — prefer not to
   if ([ident containsString:@"compact"] &&
       ![ident containsString:@"premium"] &&
       ![ident containsString:@"enhanced"]) {
@@ -274,7 +480,6 @@ static AVSpeechSynthesisVoice *pick_zh_voice(void) {
   }
   if (best) return best;
 
-  // Explicit identifiers (downloaded Enhanced/Premium if present)
   NSArray<NSString *> *prefs = @[
     @"com.apple.ttsbundle.siri_female_zh-CN_premium",
     @"com.apple.voice.compact.zh-CN.YuShu",
@@ -289,7 +494,7 @@ static AVSpeechSynthesisVoice *pick_zh_voice(void) {
   return [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
 }
 
-/// Speak Chinese reply. Pauses mic recognition so TTS is audible and not echoed.
+/// Speak Chinese reply. Mute Speech feeding; keep mic engine running.
 int voice_macos_speak(const char *text_utf8) {
   if (!text_utf8) return -1;
   NSString *text = [NSString stringWithUTF8String:text_utf8];
@@ -300,7 +505,7 @@ int voice_macos_speak(const char *text_utf8) {
 
   dispatch_async(dispatch_get_main_queue(), ^{
     g_speaking = YES;
-    stop_engine_locked();
+    pause_recognition_only();
     emit_status("speaking", text);
 
     if (!g_synth) {
@@ -315,7 +520,8 @@ int voice_macos_speak(const char *text_utf8) {
       ok = 1;
       emit_status("awake", @"请说指令：下一首、暂停、上一首…");
       if (g_running) {
-        start_recognition_session();
+        g_restart_pending = YES;
+        schedule_restart();
       }
       dispatch_semaphore_signal(sem);
     };
@@ -326,12 +532,11 @@ int voice_macos_speak(const char *text_utf8) {
 
     AVSpeechUtterance *utt = [AVSpeechUtterance speechUtteranceWithString:text];
     utt.voice = pick_zh_voice();
-    // Natural pace: a bit slower than default, normal pitch (no cartoon boost).
     utt.rate = AVSpeechUtteranceDefaultSpeechRate * 0.84f;
     utt.pitchMultiplier = 1.0f;
-    utt.volume = 1.0f;
-    utt.preUtteranceDelay = 0.08;
-    utt.postUtteranceDelay = 0.12;
+    utt.volume = 0.72f;
+    utt.preUtteranceDelay = 0.02;
+    utt.postUtteranceDelay = 0.06;
     [g_synth speakUtterance:utt];
   });
 
@@ -341,7 +546,10 @@ int voice_macos_speak(const char *text_utf8) {
     dispatch_async(dispatch_get_main_queue(), ^{
       g_speaking = NO;
       [g_synth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-      if (g_running) start_recognition_session();
+      if (g_running) {
+        g_restart_pending = YES;
+        schedule_restart();
+      }
     });
     return -2;
   }
@@ -368,6 +576,7 @@ static void begin_after_auth(void) {
     }
 
     g_engine = [[AVAudioEngine alloc] init];
+    g_tap_installed = NO;
     start_recognition_session();
   });
 }
@@ -382,6 +591,10 @@ int voice_macos_start(VoiceTranscriptCb transcript_cb, VoiceStatusCb status_cb,
   g_running = YES;
   g_restarting = NO;
   g_speaking = NO;
+  g_restart_pending = NO;
+  g_last_session_ok_at = 0;
+  g_last_restart_at = 0;
+  atomic_store(&g_feed_audio, false);
 
   NSString *bundlePath = [[NSBundle mainBundle] bundlePath] ?: @"";
   NSString *usage = [[NSBundle mainBundle]
@@ -430,12 +643,17 @@ void voice_macos_stop(void) {
   g_running = NO;
   g_restarting = NO;
   g_speaking = NO;
+  g_restart_pending = NO;
+  atomic_store(&g_feed_audio, false);
   dispatch_async(dispatch_get_main_queue(), ^{
+    if (g_watchdog_timer) {
+      [g_watchdog_timer invalidate];
+      g_watchdog_timer = nil;
+    }
     if (g_synth && [g_synth isSpeaking]) {
       [g_synth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
     }
-    stop_engine_locked();
-    g_engine = nil;
+    release_engine_deferred();
     g_recognizer = nil;
     emit_status("stopped", @"语音助手已关闭");
     g_transcript_cb = NULL;
@@ -446,27 +664,24 @@ void voice_macos_stop(void) {
 
 int voice_macos_is_running(void) { return g_running ? 1 : 0; }
 
-/// Pause mic recognition while external TTS (e.g. afplay) is running.
+/// Pause Speech feeding while external TTS (e.g. Edge / afplay) runs.
+/// Do not stop AVAudioEngine — that raced WebKit playback and crashed.
 int voice_macos_begin_external_speak(const char *detail_utf8) {
   NSString *detail = detail_utf8
                          ? [NSString stringWithUTF8String:detail_utf8]
                          : @"…";
-  if ([NSThread isMainThread]) {
+  void (^block)(void) = ^{
     g_speaking = YES;
-    stop_engine_locked();
+    pause_recognition_only();
     if (g_synth && [g_synth isSpeaking]) {
       [g_synth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
     }
     emit_status("speaking", detail.length ? detail : @"…");
+  };
+  if ([NSThread isMainThread]) {
+    block();
   } else {
-    dispatch_sync(dispatch_get_main_queue(), ^{
-      g_speaking = YES;
-      stop_engine_locked();
-      if (g_synth && [g_synth isSpeaking]) {
-        [g_synth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-      }
-      emit_status("speaking", detail.length ? detail : @"…");
-    });
+    dispatch_sync(dispatch_get_main_queue(), block);
   }
   return 0;
 }
@@ -476,7 +691,8 @@ int voice_macos_end_external_speak(void) {
     g_speaking = NO;
     emit_status("awake", @"请说指令：下一首、暂停、上一首…");
     if (g_running) {
-      start_recognition_session();
+      g_restart_pending = YES;
+      schedule_restart();
     }
   };
   if ([NSThread isMainThread]) {

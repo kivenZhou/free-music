@@ -11,9 +11,9 @@ use directories::ProjectDirs;
 use providers::ProviderRegistry;
 use std::sync::Arc;
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use voice::VoiceState;
 
@@ -23,6 +23,10 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+}
+
+fn emit_tray_action(app: &tauri::AppHandle, action: &str) {
+    let _ = app.emit("tray-action", action);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -44,12 +48,35 @@ pub fn run() {
         .manage(VoiceState::default())
         .setup(|app| {
             #[cfg(desktop)]
-            app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle()
+                    .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
+            }
 
             let show_i = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let toggle_i =
+                MenuItem::with_id(app, "toggle", "播放 / 暂停", true, None::<&str>)?;
+            let next_i = MenuItem::with_id(app, "next", "下一首", true, None::<&str>)?;
+            let prev_i = MenuItem::with_id(app, "prev", "上一首", true, None::<&str>)?;
+            let fav_i = MenuItem::with_id(app, "favorite", "收藏当前曲", true, None::<&str>)?;
+            let sep1 = PredefinedMenuItem::separator(app)?;
+            let sep2 = PredefinedMenuItem::separator(app)?;
             let quit_i = MenuItem::with_id(app, "quit", "退出音栈", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show_i,
+                    &sep1,
+                    &toggle_i,
+                    &next_i,
+                    &prev_i,
+                    &fav_i,
+                    &sep2,
+                    &quit_i,
+                ],
+            )?;
 
             let icon = app
                 .default_window_icon()
@@ -67,6 +94,10 @@ pub fn run() {
                         app.exit(0);
                     }
                     "show" => show_main(app),
+                    "toggle" => emit_tray_action(app, "toggle"),
+                    "next" => emit_tray_action(app, "next"),
+                    "prev" => emit_tray_action(app, "prev"),
+                    "favorite" => emit_tray_action(app, "favorite"),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -113,6 +144,9 @@ pub fn run() {
             commands::list_playlist_tracks,
             commands::add_to_playlist,
             commands::remove_from_playlist,
+            commands::add_play_history,
+            commands::list_play_history,
+            commands::clear_play_history,
             voice::voice_assistant_info,
             voice::start_voice_assistant,
             voice::stop_voice_assistant,

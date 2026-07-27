@@ -3,9 +3,21 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { api, formatBytes, type CacheStats } from "../api";
 import type { ProviderInfo } from "../types";
+import type { ProviderHealthEntry } from "../providerHealth";
+import {
+  DEFAULT_HOTKEYS,
+  HOTKEY_LABELS,
+  formatHotkeyAccel,
+  fromHotkeyDisplay,
+  normalizeHotkeyMap,
+  toHotkeyDisplay,
+  type HotkeyAction,
+} from "../hotkeys";
 import { checkForAppUpdate, installAppUpdate, type UpdateProgress } from "../updater";
 
 type ToastTone = "ok" | "warn" | "err";
+
+const HOTKEY_ACTIONS: HotkeyAction[] = ["toggle", "next", "prev", "favorite"];
 
 interface Props {
   providers: ProviderInfo[];
@@ -16,6 +28,15 @@ interface Props {
   voiceEnabled: boolean;
   onVoiceEnabled: (v: boolean) => void;
   voiceStatusText?: string;
+  hotkeysEnabled: boolean;
+  onHotkeysEnabled: (v: boolean) => void;
+  hotkeyMap: Record<HotkeyAction, string>;
+  onHotkeyMap: (map: Record<HotkeyAction, string>) => void;
+  hotkeyWarning?: string;
+  disabledProviders: Set<string>;
+  providerHealth: Record<string, ProviderHealthEntry>;
+  onToggleProviderDisabled: (id: string) => void;
+  onRefreshHealth?: () => void;
   active?: boolean;
   onUpdateAvailable?: (update: Update | null) => void;
 }
@@ -29,6 +50,15 @@ export function SettingsView({
   voiceEnabled,
   onVoiceEnabled,
   voiceStatusText,
+  hotkeysEnabled,
+  onHotkeysEnabled,
+  hotkeyMap,
+  onHotkeyMap,
+  hotkeyWarning,
+  disabledProviders,
+  providerHealth,
+  onToggleProviderDisabled,
+  onRefreshHealth,
   active = true,
   onUpdateAvailable,
 }: Props) {
@@ -42,6 +72,21 @@ export function SettingsView({
   const [installing, setInstalling] = useState(false);
   const [found, setFound] = useState<Update | null>(null);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [hotkeyDraft, setHotkeyDraft] = useState(() => ({
+    toggle: toHotkeyDisplay(hotkeyMap.toggle),
+    next: toHotkeyDisplay(hotkeyMap.next),
+    prev: toHotkeyDisplay(hotkeyMap.prev),
+    favorite: toHotkeyDisplay(hotkeyMap.favorite),
+  }));
+
+  useEffect(() => {
+    setHotkeyDraft({
+      toggle: toHotkeyDisplay(hotkeyMap.toggle),
+      next: toHotkeyDisplay(hotkeyMap.next),
+      prev: toHotkeyDisplay(hotkeyMap.prev),
+      favorite: toHotkeyDisplay(hotkeyMap.favorite),
+    });
+  }, [hotkeyMap]);
 
   const showToast = useCallback((text: string, tone: ToastTone = "ok") => {
     setToast({ text, tone });
@@ -117,7 +162,8 @@ export function SettingsView({
     }
   }
 
-  const chartProviders = providers;
+  const chartProviders = providers.filter((p) => !disabledProviders.has(p.id));
+  const settingsProviders = chartProviders.length > 0 ? chartProviders : providers;
   const pct =
     progress && progress.total && progress.total > 0
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
@@ -142,7 +188,7 @@ export function SettingsView({
           <h2>默认音源</h2>
           <p className="settings-desc">榜单页默认使用的音源（可随时在侧栏切换）</p>
           <div className="settings-chips">
-            {chartProviders.map((p) => (
+            {settingsProviders.map((p) => (
               <button
                 key={p.id}
                 type="button"
@@ -153,6 +199,45 @@ export function SettingsView({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="settings-block">
+          <h2>音源状态</h2>
+          <p className="settings-desc">
+            各音源成功/失败次数与最近错误；禁用后不会在榜单与搜索筛选中出现
+          </p>
+          <div className="settings-provider-health">
+            {providers.map((p) => {
+              const health = providerHealth[p.id];
+              const disabled = disabledProviders.has(p.id);
+              const lastErr = health?.lastError;
+              return (
+                <div key={p.id} className="settings-cache-row">
+                  <div className="settings-cache-stat">
+                    <strong>{p.name}</strong>
+                    <span>
+                      成功 {health?.ok ?? 0} · 失败 {health?.fail ?? 0}
+                      {lastErr
+                        ? ` · ${lastErr.slice(0, 48)}${lastErr.length > 48 ? "…" : ""}`
+                        : ""}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => onToggleProviderDisabled(p.id)}
+                  >
+                    {disabled ? "启用" : "禁用"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {onRefreshHealth ? (
+            <button type="button" className="ghost-btn" onClick={() => onRefreshHealth()}>
+              刷新统计
+            </button>
+          ) : null}
         </div>
 
         <div className="settings-block">
@@ -174,7 +259,7 @@ export function SettingsView({
             默认关闭。开启后可说「小栈小栈」唤醒。支持播控、搜歌、歌词、收藏、
             切换音源、粤语/年代等主题歌单、追加歌曲、播放收藏等。
             <br />
-            语音回复优先使用在线神经语音（微软晓晓，无需 API Key；需联网），失败时回退系统朗读。
+            短回复（如「在呢」「收到…」）用系统语音即时播报；较长内容可走在线神经语音。
             macOS 请使用打包后的 YinZhan.app。
           </p>
           <label className="settings-toggle">
@@ -187,6 +272,81 @@ export function SettingsView({
           </label>
           {voiceEnabled && voiceStatusText ? (
             <p className="settings-voice-status">{voiceStatusText}</p>
+          ) : null}
+        </div>
+
+        <div className="settings-block">
+          <h2>全局快捷键</h2>
+          <p className="settings-desc">
+            窗口在后台时也可控播放。默认 ⌘/Ctrl + ⌥ + P / ← / → / F。
+            可改成其他组合（如 Command/Control+Alt+P）。
+          </p>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={hotkeysEnabled}
+              onChange={(e) => onHotkeysEnabled(e.target.checked)}
+            />
+            <span>{hotkeysEnabled ? "已开启" : "关闭"}</span>
+          </label>
+          {hotkeysEnabled ? (
+            <div className="settings-hotkeys">
+              {HOTKEY_ACTIONS.map((action) => (
+                <label key={action} className="settings-hotkey-row">
+                  <span>{HOTKEY_LABELS[action]}</span>
+                  <input
+                    type="text"
+                    spellCheck={false}
+                    value={hotkeyDraft[action]}
+                    placeholder={toHotkeyDisplay(DEFAULT_HOTKEYS[action])}
+                    onChange={(e) =>
+                      setHotkeyDraft({ ...hotkeyDraft, [action]: e.target.value })
+                    }
+                    onBlur={(e) => {
+                      const raw =
+                        fromHotkeyDisplay(e.target.value) ||
+                        DEFAULT_HOTKEYS[action];
+                      const mergedDraft = {
+                        ...hotkeyDraft,
+                        [action]: toHotkeyDisplay(raw),
+                      };
+                      setHotkeyDraft(mergedDraft);
+                      const normalized = normalizeHotkeyMap({
+                        ...hotkeyMap,
+                        [action]: raw,
+                      });
+                      if (normalized[action] !== hotkeyMap[action]) {
+                        onHotkeyMap(normalized);
+                      }
+                    }}
+                  />
+                  <em>
+                    {formatHotkeyAccel(
+                      hotkeyDraft[action] || DEFAULT_HOTKEYS[action],
+                    )}
+                  </em>
+                </label>
+              ))}
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => {
+                  const defaults = { ...DEFAULT_HOTKEYS };
+                  setHotkeyDraft({
+                    toggle: toHotkeyDisplay(defaults.toggle),
+                    next: toHotkeyDisplay(defaults.next),
+                    prev: toHotkeyDisplay(defaults.prev),
+                    favorite: toHotkeyDisplay(defaults.favorite),
+                  });
+                  onHotkeyMap(defaults);
+                }}
+              >
+                恢复默认
+              </button>
+              {hotkeyWarning ? (
+                <p className="settings-voice-status">{hotkeyWarning}</p>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -279,7 +439,7 @@ export function SettingsView({
             <br />
             仅请求各站已开放的免费完整流；不破解会员、不绕过版权保护，也不托管或分发音源文件。与各音源平台无隶属或授权关系，请遵守平台条款与当地法律。
             <br />
-            关闭窗口会隐藏到菜单栏托盘；托盘图标可重新打开，右键可退出。
+            关闭窗口会隐藏到菜单栏托盘；左键打开窗口，右键可播放/切歌/收藏或退出。
           </p>
         </div>
       </div>

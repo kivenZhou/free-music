@@ -1,0 +1,215 @@
+html.desktop-lyrics-root,
+html.desktop-lyrics-boot,
+body.desktop-lyrics-root,
+html.desktop-lyrics-boot body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+  color-scheme: dark;
+}
+
+#root:has(.dl-shell) {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.dl-shell {
+  --dl-ink: #fff8ee;
+  --dl-accent: #f0c27a;
+  --dl-muted: rgba(255, 248, 238, 0.48);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 12px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  user-select: none;
+  cursor: grab;
+  font-family: "Songti SC", "STSong", "PingFang SC", "Hiragino Mincho ProN",
+    "Noto Serif SC", serif;
+}
+
+.dl-shell.locked {
+  cursor: default;
+}
+
+.dl-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.dl-shell.show-chrome .dl-chrome,
+.dl-shell:hover .dl-chrome {
+  opacity: 1;
+}
+
+.dl-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Outfit", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 248, 238, 0.78);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.85),
+    0 2px 8px rgba(0, 0, 0, 0.55);
+}
+
+.dl-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 248, 238, 0.12);
+  border-radius: 999px;
+  background: rgba(18, 14, 12, 0.62);
+  color: rgba(255, 248, 238, 0.9);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.dl-btn:hover {
+  background: rgba(28, 22, 18, 0.82);
+  border-color: rgba(240, 194, 122, 0.35);
+  color: var(--dl-accent);
+}
+
+.dl-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 22px 14px;
+  border-radius: 22px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(28, 22, 18, 0.42) 0%,
+      rgba(14, 11, 9, 0.55) 100%
+    );
+  border: 1px solid rgba(255, 248, 238, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 248, 238, 0.06),
+    0 10px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+}
+
+.dl-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.dl-line {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color 0.25s ease,
+    opacity 0.25s ease,
+    transform 0.28s ease;
+}
+
+.dl-line.prev,
+.dl-line.next {
+  width: 100%;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--dl-muted);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.9),
+    0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+.dl-line.current {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  white-space: normal;
+  line-height: 1.3;
+  font-size: clamp(22px, 3.2vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--dl-ink);
+  /* Hard outline for wallpaper readability (not a soft glow). */
+  -webkit-text-stroke: 0.55px rgba(20, 14, 10, 0.55);
+  paint-order: stroke fill;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.95),
+    0 2px 0 rgba(0, 0, 0, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+  animation: dl-line-in 0.32s ease both;
+}
+
+.dl-line.current.playing {
+  color: #fff1d6;
+}
+
+.dl-current-text {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.dl-line.current.dim {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(255, 248, 238, 0.62);
+  -webkit-text-stroke: 0;
+  animation: none;
+}
+
+.dl-trans {
+  font-family: "Outfit", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(240, 194, 122, 0.82);
+  -webkit-text-stroke: 0;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.85),
+    0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+@keyframes dl-line-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

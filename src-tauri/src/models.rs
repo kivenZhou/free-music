@@ -74,3 +74,11 @@ pub struct PlaylistTrackItem {
     pub track: Track,
     pub added_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayHistoryItem {
+    pub id: i64,
+    pub track: Track,
+    pub played_at: String,
+}

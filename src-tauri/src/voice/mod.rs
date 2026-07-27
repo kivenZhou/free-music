@@ -273,7 +273,21 @@ pub async fn report_voice_web_status(
     Ok(())
 }
 
-/// Speak a short Chinese reply. Prefers online neural voice; falls back to system TTS.
+/// Short acks (wake / 收到…) must be instant — Edge TTS often costs several seconds.
+fn prefer_fast_system_tts(text: &str) -> bool {
+    let n = text.chars().count();
+    if n <= 18 {
+        return true;
+    }
+    // Wake / transport acknowledgements even if slightly longer.
+    text == "在呢"
+        || text.starts_with("收到")
+        || text.starts_with("好的")
+        || text.starts_with("已")
+}
+
+/// Speak a Chinese reply. Short phrases use system TTS immediately; longer lines
+/// prefer online neural voice (with a tight timeout) then fall back to system TTS.
 #[tauri::command]
 pub async fn voice_speak(text: String) -> Result<(), String> {
     let text = text.trim().to_string();
@@ -283,9 +297,16 @@ pub async fn voice_speak(text: String) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
+        if prefer_fast_system_tts(&text) {
+            tokio::task::spawn_blocking(move || macos::speak(&text))
+                .await
+                .map_err(|e| format!("语音播报任务失败: {e}"))??;
+            return Ok(());
+        }
+
         let for_edge = text.clone();
         let edge = tokio::time::timeout(
-            std::time::Duration::from_secs(8),
+            std::time::Duration::from_secs(3),
             tokio::task::spawn_blocking(move || synthesize_edge_mp3(&for_edge)),
         )
         .await;

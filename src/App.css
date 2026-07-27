@@ -566,6 +566,17 @@ button {
   white-space: nowrap;
 }
 
+.settings-provider-health {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.settings-provider-health .settings-cache-row {
+  align-items: flex-start;
+}
+
 .settings-block {
   margin-top: 28px;
   padding-top: 20px;
@@ -609,6 +620,39 @@ button {
   width: 16px;
   height: 16px;
   accent-color: var(--accent);
+}
+
+.settings-hotkeys {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.settings-hotkey-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-secondary, #c9c2b8);
+}
+
+.settings-hotkey-row input {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+}
+
+.settings-hotkey-row em {
+  font-style: normal;
+  opacity: 0.72;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .settings-voice-status {
@@ -1596,6 +1640,11 @@ button {
   width: 100%;
 }
 
+.song-list.virtual {
+  /* Padding used as virtualization spacers; keep gap for visible rows only. */
+  box-sizing: content-box;
+}
+
 .list-dim {
   opacity: 0.55;
   pointer-events: none;
@@ -2316,6 +2365,13 @@ button {
 }
 
 .lyrics-head > .icon-btn {
+  flex-shrink: 0;
+}
+
+.lyrics-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
   margin-left: auto;
 }

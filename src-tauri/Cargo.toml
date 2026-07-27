@@ -1,6 +1,6 @@
 [package]
 name = "yinzhan"
-version = "0.2.0"
+version = "0.2.1"
 description = "音栈 — 国内优先的桌面音乐客户端"
 authors = ["zzy"]
 edition = "2021"
@@ -14,7 +14,7 @@ tauri-build = { version = "2", features = [] }
 cc = "1"
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -32,4 +32,5 @@ tauri-plugin-process = "2.3.1"
 msedge-tts = "0.4.0"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2.10.1"
