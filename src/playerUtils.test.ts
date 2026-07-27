@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatStreamQuality,
   playbackDuration,
   sortProvidersByOrder,
 } from "./playerUtils";
@@ -38,5 +39,17 @@ describe("playbackDuration", () => {
       seekable: { length: 0 },
     } as HTMLAudioElement;
     expect(playbackDuration(audio, 90_000)).toBe(120);
+  });
+});
+
+describe("formatStreamQuality", () => {
+  it("formats bitrate numbers", () => {
+    expect(formatStreamQuality("320000")).toBe("320kbps");
+    expect(formatStreamQuality("128")).toBe("128kbps");
+  });
+
+  it("hides opaque cache labels", () => {
+    expect(formatStreamQuality("cache")).toBeNull();
+    expect(formatStreamQuality("outer")).toBeNull();
   });
 });

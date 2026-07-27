@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, PlayUrl, Playability, Track};
+use crate::models::{AudioQuality, Chart, PlayUrl, Playability, Track};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
@@ -340,7 +340,11 @@ impl MusicProvider for AudiusProvider {
         Ok(tracks.into_iter().take(limit as usize).collect())
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+    async fn play_url(
+        &self,
+        track_id: &str,
+        _quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
         let cached = self.cache_dir.join(format!("audius_{track_id}.mp3"));
         if cached.exists() {
             if let Ok(meta) = std::fs::metadata(&cached) {

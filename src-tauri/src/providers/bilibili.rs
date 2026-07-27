@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, Playability, PlayUrl, Track};
+use crate::models::{AudioQuality, Chart, Playability, PlayUrl, Track};
 use async_trait::async_trait;
 use reqwest::cookie::Jar;
 use reqwest::Client;
@@ -702,7 +702,11 @@ impl MusicProvider for BilibiliProvider {
         Ok(candidates.into_iter().take(limit as usize).collect())
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
+    async fn play_url(
+        &self,
+        track_id: &str,
+        _quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
         let (remotes, duration_secs) = self.get_play_info(track_id).await?;
         let path = self.cache_path(track_id);
         let min_bytes = Self::min_bytes_for_duration(duration_secs.max(30));

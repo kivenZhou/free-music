@@ -2,8 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { api, formatBytes, type CacheStats } from "../api";
-import type { ProviderInfo } from "../types";
+import type { AudioQuality, ProviderInfo, ThemeMode } from "../types";
 import type { ProviderHealthEntry } from "../providerHealth";
+import {
+  AUDIO_QUALITY_OPTIONS,
+} from "../playerUtils";
+import { themeLabel } from "../theme";
 import {
   DEFAULT_HOTKEYS,
   HOTKEY_LABELS,
@@ -18,6 +22,7 @@ import { checkForAppUpdate, installAppUpdate, type UpdateProgress } from "../upd
 type ToastTone = "ok" | "warn" | "err";
 
 const HOTKEY_ACTIONS: HotkeyAction[] = ["toggle", "next", "prev", "favorite"];
+const THEME_OPTIONS: ThemeMode[] = ["dark", "light"];
 
 interface Props {
   providers: ProviderInfo[];
@@ -25,6 +30,10 @@ interface Props {
   onProviderId: (id: string) => void;
   autoSkip: boolean;
   onAutoSkip: (v: boolean) => void;
+  theme: ThemeMode;
+  onTheme: (t: ThemeMode) => void;
+  audioQuality: AudioQuality;
+  onAudioQuality: (q: AudioQuality) => void;
   voiceEnabled: boolean;
   onVoiceEnabled: (v: boolean) => void;
   voiceStatusText?: string;
@@ -47,6 +56,10 @@ export function SettingsView({
   onProviderId,
   autoSkip,
   onAutoSkip,
+  theme,
+  onTheme,
+  audioQuality,
+  onAudioQuality,
   voiceEnabled,
   onVoiceEnabled,
   voiceStatusText,
@@ -184,6 +197,46 @@ export function SettingsView({
       </header>
 
       <div className="panel-body">
+        <div className="settings-block">
+          <h2>外观</h2>
+          <p className="settings-desc">切换深色 / 浅色界面（窗口标题栏同步）</p>
+          <div className="settings-chips">
+            {THEME_OPTIONS.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`chip ${theme === t ? "on" : ""}`}
+                onClick={() => onTheme(t)}
+              >
+                {themeLabel(t)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-block">
+          <h2>音质偏好</h2>
+          <p className="settings-desc">
+            请求播放地址时的目标音质；音源无对应档位时自动降级。已缓存的曲目可能仍是旧音质，可清缓存后重试。
+          </p>
+          <div className="settings-chips">
+            {AUDIO_QUALITY_OPTIONS.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className={`chip ${audioQuality === o.id ? "on" : ""}`}
+                title={o.hint}
+                onClick={() => onAudioQuality(o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <p className="settings-voice-status">
+            {AUDIO_QUALITY_OPTIONS.find((o) => o.id === audioQuality)?.hint}
+          </p>
+        </div>
+
         <div className="settings-block">
           <h2>默认音源</h2>
           <p className="settings-desc">榜单页默认使用的音源（可随时在侧栏切换）</p>

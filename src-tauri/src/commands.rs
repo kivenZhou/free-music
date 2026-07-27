@@ -1,8 +1,8 @@
 use crate::cache::{self, CacheStats};
 use crate::db::Database;
 use crate::models::{
-    Chart, FavoriteItem, PlayHistoryItem, PlayUrl, Playlist, PlaylistTrackItem, SearchHistoryItem,
-    Track,
+    AudioQuality, Chart, FavoriteItem, PlayHistoryItem, PlayUrl, Playlist, PlaylistTrackItem,
+    SearchHistoryItem, Track,
 };
 use crate::providers::ProviderRegistry;
 use serde::Serialize;
@@ -102,8 +102,10 @@ pub async fn resolve_play_url(
     provider: Option<String>,
     title: Option<String>,
     artist: Option<String>,
+    quality: Option<AudioQuality>,
 ) -> Result<PlayUrl, String> {
     let provider_name = provider.unwrap_or_else(|| "netease".into());
+    let quality = quality.unwrap_or_default();
     let res = state
         .providers
         .resolve_play(
@@ -111,6 +113,7 @@ pub async fn resolve_play_url(
             &provider_name,
             title.as_deref(),
             artist.as_deref(),
+            quality,
         )
         .await;
 
@@ -135,6 +138,7 @@ pub async fn resolve_play_url(
                                             "kuwo",
                                             Some(t),
                                             Some(a),
+                                            quality,
                                         )
                                         .await
                                     {

@@ -27,6 +27,7 @@ interface Props {
   error: string | null;
   progress: number;
   duration: number;
+  streamQuality?: string | null;
   hasPrev: boolean;
   hasNext: boolean;
   favorited: boolean;
@@ -110,6 +111,7 @@ export function PlayerBar({
   error,
   progress,
   duration,
+  streamQuality,
   hasPrev,
   hasNext,
   favorited,
@@ -145,7 +147,9 @@ export function PlayerBar({
           <div className="player-title">{track?.title ?? "尚未播放"}</div>
           <div className="player-artist">
             {track
-              ? `${track.artist} · ${providerLabel(track.provider)}`
+              ? `${track.artist} · ${providerLabel(track.provider)}${
+                  streamQuality ? ` · ${streamQuality}` : ""
+                }`
               : "选一首免费完整曲开始"}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AudioQuality,
   Chart,
   FavoriteItem,
   PlayHistoryItem,
@@ -23,12 +24,13 @@ export const api = {
     provider: string | null = null,
     offset = 0,
   ) => invoke<Track[]>("chart_tracks", { chartId, limit, provider, offset }),
-  resolvePlayUrl: (track: Track) =>
+  resolvePlayUrl: (track: Track, quality: AudioQuality = "high") =>
     invoke<PlayUrl>("resolve_play_url", {
       trackId: track.id,
       provider: track.provider,
       title: track.title,
       artist: track.artist,
+      quality,
     }),
   getSearchHistory: (limit = 20) =>
     invoke<SearchHistoryItem[]>("get_search_history", { limit }),

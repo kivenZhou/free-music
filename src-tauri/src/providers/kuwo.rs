@@ -1,5 +1,5 @@
 use super::{MusicProvider, ProviderError};
-use crate::models::{Chart, PlayUrl, Playability, Track};
+use crate::models::{AudioQuality, Chart, PlayUrl, Playability, Track};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde_json::Value;
@@ -149,49 +149,54 @@ impl KuwoProvider {
     async fn resolve_remote(
         &self,
         track_id: &str,
+        quality: AudioQuality,
     ) -> Result<(String, u64, u64), ProviderError> {
         let sources = [
             "jiakong",
             "kwplayer_ar_1.1.9_oppo_118980_320.apk",
         ];
-        for source in sources {
-            let url = format!(
-                "http://mobi.kuwo.cn/mobi.s?f=web&source={source}&type=convert_url_with_sign&rid={track_id}&br=128kmp3"
-            );
-            let Ok(resp) = self.client.get(&url).send().await else {
-                continue;
-            };
-            let Ok(json) = resp.json::<Value>().await else {
-                continue;
-            };
-            let data = json.get("data").cloned().unwrap_or(Value::Null);
-            let remote = data
-                .get("url")
-                .and_then(|v| v.as_str())
-                .filter(|u| u.starts_with("http"))
-                .map(prefer_http);
-            let duration = data
-                .get("duration")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let bitrate = data
-                .get("bitrate")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            if let Some(remote) = remote {
-                if is_stub_meta(duration, bitrate) {
-                    return Err(ProviderError::Msg(
-                        "该曲仅限酷我客户端，已跳过".into(),
-                    ));
+        let mut last_err = ProviderError::Msg("酷我未返回可播地址".into());
+        for br in quality.kuwo_brs() {
+            for source in sources {
+                let url = format!(
+                    "http://mobi.kuwo.cn/mobi.s?f=web&source={source}&type=convert_url_with_sign&rid={track_id}&br={br}"
+                );
+                let Ok(resp) = self.client.get(&url).send().await else {
+                    continue;
+                };
+                let Ok(json) = resp.json::<Value>().await else {
+                    continue;
+                };
+                let data = json.get("data").cloned().unwrap_or(Value::Null);
+                let remote = data
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .filter(|u| u.starts_with("http"))
+                    .map(prefer_http);
+                let duration = data
+                    .get("duration")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let bitrate = data
+                    .get("bitrate")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if let Some(remote) = remote {
+                    if is_stub_meta(duration, bitrate) {
+                        last_err = ProviderError::Msg(
+                            "该曲仅限酷我客户端，已跳过".into(),
+                        );
+                        continue;
+                    }
+                    if duration > 0 && duration < 45 {
+                        last_err = ProviderError::Msg("该曲为短片段，已跳过".into());
+                        continue;
+                    }
+                    return Ok((remote, duration, bitrate));
                 }
-                if duration > 0 && duration < 45 {
-                    // likely clip
-                    return Err(ProviderError::Msg("该曲为短片段，已跳过".into()));
-                }
-                return Ok((remote, duration, bitrate));
             }
         }
-        Err(ProviderError::Msg("酷我未返回可播地址".into()))
+        Err(last_err)
     }
 
     async fn download_to_cache(&self, track_id: &str, remote: &str) -> Result<PathBuf, ProviderError> {
@@ -387,8 +392,12 @@ impl MusicProvider for KuwoProvider {
             .collect())
     }
 
-    async fn play_url(&self, track_id: &str) -> Result<PlayUrl, ProviderError> {
-        let (remote, _dur, br) = self.resolve_remote(track_id).await?;
+    async fn play_url(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<PlayUrl, ProviderError> {
+        let (remote, _dur, br) = self.resolve_remote(track_id, quality).await?;
         let path = self.cache_dir.join(format!("kuwo_{track_id}.mp3"));
         if path.exists() {
             if let Ok(meta) = std::fs::metadata(&path) {
