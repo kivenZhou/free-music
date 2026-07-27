@@ -1,6 +1,6 @@
 [package]
 name = "yinzhan"
-version = "0.2.3"
+version = "0.2.4"
 description = "音栈 — 国内优先的桌面音乐客户端"
 authors = ["zzy"]
 edition = "2021"
