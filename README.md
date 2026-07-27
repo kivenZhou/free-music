@@ -15,7 +15,7 @@
 | 项目 | 说明 |
 |------|------|
 | 支持平台 | macOS（Intel / Apple Silicon）、Windows x64 |
-| 当前版本 | [v0.2.1](https://github.com/kivenZhou/free-music/releases/tag/v0.2.1) |
+| 当前版本 | [v0.2.2](https://github.com/kivenZhou/free-music/releases/tag/v0.2.2) |
 | 许可证 | [MIT](./LICENSE) |
 | 发行页 | [GitHub Releases](https://github.com/kivenZhou/free-music/releases) |
 
@@ -90,7 +90,10 @@ xattr -cr /Applications/音栈.app
 
 ### Windows
 
-运行安装程序完成安装。若出现 SmartScreen 提示，选择「仍要运行」（开源未签名安装包的常见情况）。
+1. 下载完整的 `YinZhan_*_windows_x64-setup.exe`（勿用微信直接转发；建议浏览器或网盘）。
+2. 双击安装。若出现 SmartScreen「已阻止」，点「更多信息」→「仍要运行」（开源未签名包的常见情况）。
+3. 安装程序为**当前用户**安装，一般不需要管理员权限。
+4. 若安装后无法启动，请先安装 [WebView2 运行时](https://developer.microsoft.com/microsoft-edge/webview2/)（Edge 用户通常已自带）。
 
 ---
 
